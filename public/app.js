@@ -1,4 +1,5 @@
 import { createGitWorkspace } from "./git-workspace.js";
+import { createPalette } from "./palette.js";
 
 const storedFavorites = JSON.parse(localStorage.getItem("devhub_favorites") || "[]");
 const storedRecent = JSON.parse(localStorage.getItem("devhub_recent") || "[]");
@@ -42,7 +43,9 @@ const state = {
   gitBranches: new Map(),
   gitBranchLoading: new Set(),
   gitBranchMenu: null,
-  activeLogId: null
+  activeLogId: null,
+  github: null,
+  githubLoading: false
 };
 
 const elements = {
@@ -73,7 +76,9 @@ const elements = {
 };
 
 const isMac = /mac|iphone|ipad/i.test(navigator.userAgentData?.platform || navigator.platform || navigator.userAgent);
-document.querySelector("#search-shortcut").textContent = isMac ? "⌘K" : "Strg K";
+document.querySelector("#palette-shortcut").textContent = isMac ? "⌘K" : "Strg K";
+document.querySelector("#palette-editor-key").textContent = isMac ? "⌘" : "Strg";
+document.querySelector("#palette-browser-key").textContent = isMac ? "⌥" : "Alt";
 
 const statusLabels = { stopped: "bereit", starting: "startet", running: "läuft", stopping: "stoppt", error: "Fehler" };
 const techPresentation = {
@@ -1855,10 +1860,67 @@ elements.restartLog.addEventListener("click", () => { if (state.activeLogId) run
 elements.logDialog.addEventListener("close", () => { state.activeLogId = null; }); elements.logDialog.addEventListener("click", (event) => { if (event.target === elements.logDialog) elements.logDialog.close(); });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !elements.svcPanel.hidden) { setServicePanel(false); elements.svcPill.focus(); return; }
-  if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "k") { event.preventDefault(); elements.search.focus(); elements.search.select(); }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "k") { event.preventDefault(); palette.open(); return; }
   if (event.key === "/" && !["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) { event.preventDefault(); elements.search.focus(); }
 });
 
 const gitWorkspace = createGitWorkspace({ root: elements.gitPage, state, api, renderApp: () => render(false), renderPatch, escapeHtml, toast, projectAction: runProjectAction, rescan });
+
+// Einträge der Befehlspalette: zuerst Projekte mit ihren häufigsten Aktionen, dann allgemeine Befehle,
+// zuletzt Repositories aus dem GitHub-Konto, die noch nicht im Workspace liegen.
+function paletteItems() {
+  const items = [];
+  const editorName = state.capabilities?.editor.name || "Editor";
+  for (const project of state.projects) {
+    const keywords = `${project.relativePath} ${project.technologies.join(" ")}`;
+    const url = browserUrl(project);
+    const openEditor = state.capabilities?.editor.available ? () => runProjectAction(project.id, "editor") : null;
+    const openBrowser = url ? () => { markRecent(project.id); window.open(url, "_blank", "noopener"); } : null;
+    const base = { group: "Projekte", keywords, editor: openEditor, browser: openBrowser, rank: state.recent.includes(project.id) ? 4 - Math.min(3, state.recent.indexOf(project.id)) : 0 };
+    items.push({ ...base, icon: "folder-open", label: project.name, hint: projectIsRunning(project) ? "läuft" : project.relativePath, run: () => openProjectDetails(project.id), rank: base.rank + 2 });
+    for (const launcher of topLaunchers(project)) {
+      const running = ["starting", "running"].includes(launcher.runtime.status);
+      const single = topLaunchers(project).length === 1;
+      items.push({ ...base, icon: running ? "stop" : "play", label: `${project.name}${single ? "" : ` · ${launcher.name}`} ${running ? "stoppen" : "starten"}`, hint: launcher.command, keywords: `${keywords} ${launcher.name}`, run: () => runLauncher(launcher.id, running ? "stop" : "start") });
+    }
+    if (url) items.push({ ...base, icon: "arrow-up-right-from-square", label: `${project.name} im Browser öffnen`, hint: url.replace(/^https?:\/\//, "").replace(/\/$/, ""), run: openBrowser });
+    if (openEditor) items.push({ ...base, icon: "code", label: `${project.name} in ${editorName} öffnen`, hint: "", run: openEditor });
+    if (state.capabilities?.terminal.available) items.push({ ...base, icon: "terminal", label: `${project.name} im Terminal öffnen`, hint: "", run: () => runProjectAction(project.id, "terminal") });
+    items.push({ ...base, icon: "folder", label: `${project.name} im Ordner zeigen`, hint: "", run: () => runProjectAction(project.id, "folder") });
+    if (project.git) items.push({ ...base, icon: "code-branch", label: `${project.name} in der Git-Zentrale`, hint: project.git.dirty ? `${project.git.changedFiles} geändert` : project.git.branch || "", run: () => openGitWorkspace(project.id) });
+  }
+  const command = (icon, label, hint, run, keywords = "") => items.push({ group: "Befehle", icon, label, hint, run, keywords });
+  const stack = state.stack;
+  if (stack?.installed) {
+    const web = webOnline();
+    if (stackAction(web ? "stop" : "start")) command(web ? "power-off" : "play", web ? `${stack.name}-Dienste stoppen` : `${stack.name}-Dienste starten`, stackAction(web ? "stop" : "start").description, () => runStackAction(web ? "stop" : "start"), "nginx apache webserver dienste");
+    if (stackAction("reload")) command("arrows-rotate", `${stack.name}-Dienste neu starten`, "", () => runStackAction("reload"), "nginx apache webserver");
+    if (stackAction("open")) command("up-right-from-square", `${stack.name} öffnen`, "", () => runStackAction("open"));
+  }
+  const running = state.projects.flatMap((project) => project.launchers).filter((launcher) => ["starting", "running"].includes(launcher.runtime.status));
+  if (running.length) command("stop", "Alle laufenden Starter stoppen", `${running.length} ${running.length === 1 ? "läuft" : "laufen"}`, () => running.forEach((launcher) => runLauncher(launcher.id, "stop")));
+  command("code-branch", "Git-Zentrale öffnen", "", () => setWorkspacePage("git"), "repositories");
+  command("house", "Projekte anzeigen", "", () => setWorkspacePage("projects"));
+  command("rotate", "Workspace neu einlesen", state.root, rescan, "scan aktualisieren");
+  command("folder-tree", "Workspace wechseln …", state.root, openWorkspaceSettings, "ordner");
+  command("plus", "Repository klonen oder anlegen …", "", () => { setWorkspacePage("git"); gitWorkspace.openAddRepository(); }, "github git clone");
+  if (state.github?.available) {
+    for (const repo of state.github.repositories.filter((item) => !gitWorkspace.isInWorkspace(item)).slice(0, 60)) {
+      items.push({ group: "Von GitHub klonen", icon: "cloud-arrow-down", label: `${repo.name} klonen`, hint: repo.isPrivate ? "privat" : "öffentlich", keywords: `${repo.nameWithOwner} ${repo.description || ""} github`, run: () => { setWorkspacePage("git"); gitWorkspace.openGithubClone(repo.nameWithOwner, repo.name); } });
+    }
+  }
+  return items;
+}
+
+async function loadGithubRepositories() {
+  if (state.githubLoading || state.github) return;
+  state.githubLoading = true;
+  try { state.github = await gitWorkspace.githubRepositories(); }
+  catch { state.github = { available: false, repositories: [] }; }
+  finally { state.githubLoading = false; palette.refresh(); render(); }
+}
+
+const palette = createPalette({ items: paletteItems, escapeHtml, onOpen: loadGithubRepositories });
+document.querySelector("#palette-open").addEventListener("click", () => palette.open());
 
 bootstrap();

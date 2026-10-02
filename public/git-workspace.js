@@ -772,5 +772,12 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
     const file = event.target.closest('.gw-file > button[data-gw="file"]');
     if (file && ["ArrowDown", "ArrowUp"].includes(event.key)) { event.preventDefault(); const files = [...root.querySelectorAll('.gw-file > button[data-gw="file"]')]; const next = files[files.indexOf(file) + (event.key === "ArrowDown" ? 1 : -1)]; if (next) { const path = next.dataset.path; interact(next).then(() => root.querySelector(`.gw-file > button[data-path="${CSS.escape(path)}"]`)?.focus()); } }
   });
-  return { render, load: ensure, openAddRepository: () => { if (!busy) addRepository(); } };
+  return {
+    render, load: ensure,
+    openAddRepository: () => { if (!busy) addRepository(); },
+    // Für die Befehlspalette und die Projektliste: GitHub-Repositories des angemeldeten Kontos und der Klon-Dialog.
+    githubRepositories: async () => { await loadGithub(); return github; },
+    isInWorkspace: repo => Boolean(inWorkspace(repo)),
+    openGithubClone: (repo, name) => { if (!busy) interact({ dataset: { gw: "github-clone", repo, name } }).catch(error => toast(error.message, "error")); }
+  };
 }

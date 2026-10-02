@@ -26,6 +26,10 @@
         <button id="mobile-search" class="sidebar-icon mobile-only" aria-label="Suche öffnen"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></button>
       </div>
 
+      <button id="palette-open" class="wb-palette-trigger" type="button" aria-haspopup="dialog" aria-controls="palette">
+        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><span>Springen zu …</span><kbd id="palette-shortcut">⌘K</kbd>
+      </button>
+
       <section class="side-group" aria-labelledby="views-heading">
         <p class="side-label" id="views-heading">Arbeitsbereich</p>
         <nav id="view-filters" class="side-nav">
@@ -84,7 +88,7 @@
             <i class="fa-solid fa-magnifying-glass global-search-icon" aria-hidden="true"></i>
             <span id="workspace-search-label" class="sr-only">Projekte durchsuchen</span>
             <input id="search" type="search" placeholder="Projekte durchsuchen …" autocomplete="off">
-            <kbd id="search-shortcut">Strg K</kbd>
+            <kbd id="search-shortcut">/</kbd>
           </label>
           <div class="wb-svc" id="svc">
             <button id="svc-pill" class="wb-svc-pill" type="button" aria-expanded="false" aria-controls="svc-panel" aria-haspopup="dialog">
@@ -200,6 +204,21 @@
 
   <dialog id="project-dialog" class="project-dialog" aria-labelledby="project-dialog-title">
     <div id="project-dialog-content"></div>
+  </dialog>
+
+  <dialog id="palette" class="wb-palette" aria-label="Befehlspalette">
+    <div class="wb-palette-q">
+      <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+      <input id="palette-input" type="text" role="combobox" aria-controls="palette-list" aria-expanded="true" aria-autocomplete="list" aria-label="Projekt, Aktion oder Repository suchen" placeholder="Projekt, Aktion oder Repository …" autocomplete="off" spellcheck="false">
+      <kbd>esc</kbd>
+    </div>
+    <div id="palette-list" class="wb-palette-list" role="listbox" aria-label="Treffer"></div>
+    <footer class="wb-palette-foot">
+      <span><kbd>↵</kbd> ausführen</span>
+      <span><kbd id="palette-editor-key">⌘</kbd><kbd>↵</kbd> im Editor</span>
+      <span><kbd id="palette-browser-key">⌥</kbd><kbd>↵</kbd> im Browser</span>
+      <span><kbd>↑</kbd><kbd>↓</kbd> wählen</span>
+    </footer>
   </dialog>
 
   <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
