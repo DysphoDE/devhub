@@ -88,6 +88,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
     read(id, "workspace", "workspace");
     if (s.tab === "changes") {
       if (p.git.files.length) read(id, "stats", "stats");
+      else read(id, "history::false", "history?query=&all=false");
       const available = p.git.files.filter(s.advanced ? (s.scope === "staged" ? staged : working) : () => true);
       if (!available.some(f => f.path === s.file)) s.file = available[0]?.path || null;
       if (s.file) read(id, `diff:${s.advanced ? "index" : "all"}:${s.file}`, `diff?file=${encodeURIComponent(s.file)}&combined=${!s.advanced}`);
@@ -156,7 +157,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
       <div class="gw-segments" aria-label="Repositories filtern">${[["all", "Alle"], ["changed", "Geändert"], ["sync", "Sync"]].map(([value, label]) => button(label, "filter", `data-value="${value}" aria-pressed="${repoFilter === value}"`, false, repoFilter === value ? "active" : "")).join("")}</div>
       <div class="gw-repo-list" data-gw-scroll="repositories">
         <button class="gw-repo gw-repo-overview ${view === "overview" ? "active" : ""}" data-gw="overview" aria-pressed="${view === "overview"}"><span class="gw-repo-icon">${icon("table-cells-large")}</span><span><strong>Übersicht</strong><small>${plural(repositories.length, "Repository", "Repositories")}</small></span><span class="gw-repo-count ${dirty ? "dirty" : "clean"}">${dirty || icon("check")}</span></button>
-        ${filtered.map(p => `<button class="gw-repo ${view === "repo" && p.id === state.activeGitProjectId ? "active" : ""}" data-gw="repository" data-id="${p.id}" aria-pressed="${view === "repo" && p.id === state.activeGitProjectId}"><span class="gw-repo-icon">${icon("book-bookmark")}</span><span><strong>${esc(p.name)}</strong><small>${icon("code-branch")} ${esc(p.git.branch || "Detached HEAD")}${p.git.ahead ? ` <em class="ahead">↑${p.git.ahead}</em>` : ""}${p.git.behind ? ` <em class="behind">↓${p.git.behind}</em>` : ""}</small></span><span class="gw-repo-count ${p.git.files.some(conflict) ? "conflict" : p.git.dirty ? "dirty" : "clean"}">${p.git.files.some(conflict) ? icon("triangle-exclamation") : p.git.dirty ? p.git.changedFiles : icon("check")}</span></button>`).join("") || `<p class="gw-list-empty">Keine passenden Repositories.</p>`}</div>
+        ${filtered.map(p => `<button class="gw-repo ${view === "repo" && p.id === state.activeGitProjectId ? "active" : ""}" data-gw="repository" data-id="${p.id}" title="${esc(p.name)}" aria-pressed="${view === "repo" && p.id === state.activeGitProjectId}"><span class="gw-repo-icon">${icon("book-bookmark")}</span><span><strong>${esc(p.name)}</strong><small>${icon("code-branch")} ${esc(p.git.branch || "Detached HEAD")}${p.git.ahead ? ` <em class="ahead">↑${p.git.ahead}</em>` : ""}${p.git.behind ? ` <em class="behind">↓${p.git.behind}</em>` : ""}</small></span><span class="gw-repo-count ${p.git.files.some(conflict) ? "conflict" : p.git.dirty ? "dirty" : "clean"}">${p.git.files.some(conflict) ? icon("triangle-exclamation") : p.git.dirty ? p.git.changedFiles : icon("check")}</span></button>`).join("") || `<p class="gw-list-empty">Keine passenden Repositories.</p>`}</div>
       <footer><span class="gw-live-dot"></span><span>Lokaler Workspace</span><small>${dirty} geändert</small></footer></aside>`;
   }
 
@@ -227,7 +228,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
   function guide(p, w) {
     const info = syncInfo(p, w);
     if (info.dismissible && dismissedGuides.has(info.key)) return "";
-    if (info.key === "clean" && !p.git.dirty && dismissedGuides.has("clean")) return "";
+    if (info.key === "clean") return "";
     return `<div class="gw-guide tone-${info.tone}" role="status">${icon(info.glyph)}<p>${info.guide}</p><div class="gw-guide-actions">${(info.actions || []).map(([label, action, attrs, style]) => button(label, action, attrs, false, `gw-small ${style}`)).join("")}${info.dismissible ? button(icon("xmark"), "dismiss-guide", `data-value="${info.key}" aria-label="Hinweis nicht mehr zeigen" title="Für diesen Zustand nicht mehr zeigen"`, false, "gw-icon-button") : ""}</div></div>`;
   }
   function navigation(p, w) {
@@ -235,7 +236,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
     const secondary = { branches: ["diagram-project", "Branches"], stashes: ["box-archive", "Stashes"], tags: ["tag", "Tags"], settings: ["sliders", "Repository"] }[s.tab];
     const tab = (value, glyph, label, total) => button(`${icon(glyph)}<span>${label}</span>${total ? `<b>${total}</b>` : ""}`, "tab", `data-value="${value}" aria-pressed="${s.tab === value}"`, false, s.tab === value ? "active" : "");
     return `<nav class="gw-tabs" aria-label="Git-Arbeitsbereich">${tab("changes", "pen-to-square", "Änderungen", p.git.changedFiles)}${tab("history", "clock-rotate-left", "Verlauf")}${secondary ? `<span class="gw-tab-secondary">${tab(s.tab, secondary[0], secondary[1])}${button(icon("xmark"), "tab", 'data-value="changes" aria-label="Zurück zu den Änderungen"', false, "gw-icon-button")}</span>` : ""}
-      <span class="gw-tabs-spacer"></span><span class="gw-branch-status">${p.git.dirty ? `<i class="gw-dot dirty"></i> ${plural(p.git.changedFiles, "Datei geändert", "Dateien geändert")}` : '<i class="gw-dot clean"></i> Arbeitsbaum sauber'}</span>
+      <span class="gw-tabs-spacer"></span>
       <span class="gw-more-wrap">${button(icon("ellipsis") + " Repository " + icon("chevron-down"), "menu", `data-value="more" aria-haspopup="menu" aria-expanded="${menu === "more"}"`, false, `gw-more ${menu === "more" ? "open" : ""}`)}${menu === "more" ? morePopover(p, w) : ""}</span></nav>`;
   }
 
@@ -298,9 +299,36 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
     if (dirs.length === 1 && dirs[0] === "") return files.map(f => fileRow(p, f, status(f), extra(f))).join("");
     return dirs.map(dir => `<div class="gw-file-group ${s.collapsed.has(dir) ? "collapsed" : ""}"><button type="button" class="gw-file-group-head" data-gw="fold" data-dir="${esc(dir)}" aria-expanded="${!s.collapsed.has(dir)}">${icon(s.collapsed.has(dir) ? "chevron-right" : "chevron-down")}<span>${dir ? esc(dir) : "Projektordner"}</span><b>${groups.get(dir).length}</b></button>${s.collapsed.has(dir) ? "" : groups.get(dir).map(f => fileRow(p, f, status(f), extra(f))).join("")}</div>`).join("");
   }
+  function calmView(p, w) {
+    const info = syncInfo(p, w);
+    const g = p.git;
+    const history = data(p.id, "history::false");
+    const commits = history?.commits?.slice(0, 6) || [];
+    const editor = state.capabilities?.editor.available ? button(icon("code") + " Im Editor öffnen", "editor") : "";
+    const states = {
+      clean: ["check", "Alles committet und hochgeladen", `„${esc(g.branch || "HEAD")}“ und ${esc(g.upstream || "das Remote")} zeigen auf denselben Commit. Sobald du eine Datei änderst, erscheint sie hier mit dem Commit-Formular.`, editor],
+      ahead: ["arrow-up", `${plural(g.ahead, "Commit wartet", "Commits warten")} auf den Push`, "Der Arbeitsbaum ist sauber. Lade die lokalen Commits hoch, damit dein Stand gesichert ist.", button(icon("arrow-up") + " Jetzt pushen", "push", "", false, "gw-primary")],
+      behind: ["arrow-down", `${plural(g.behind, "neuer Commit", "neue Commits")} auf ${esc(g.upstream || "dem Remote")}`, "Ein Pull übernimmt sie per Fast-forward, ohne Merge-Commit.", button("Was kommt rein?", "compare", `data-branch="${esc(g.upstream || "")}"`) + button(icon("arrow-down") + " Pull", "pull", "", false, "gw-primary")],
+      diverged: ["code-compare", "Erst holen, dann pushen", "Nach dem Pull zeigt DevHub, ob Konflikte entstanden sind.", button("Pull …", "pull-dialog", "", false, "gw-primary")],
+      publish: ["cloud-arrow-up", `„${esc(g.branch || "")}“ gibt es nur hier`, `Veröffentlichen legt den Branch auf ${esc(g.remoteName || "dem Remote")} an.`, button(icon("cloud-arrow-up") + " Veröffentlichen", "push", "", false, "gw-primary")],
+      noremote: ["cloud", "Noch nirgends gesichert", g.lastCommit ? `Letzter Commit ${ago(g.lastCommit.date)}, nur auf diesem Rechner.` : "Dieses Repository existiert nur lokal.", button(icon("cloud") + " Remote hinzufügen", "remote-add-dialog", "", false, "gw-primary")],
+      nocommit: ["code-commit", "Bereit für den ersten Commit", "Sobald Dateien im Projekt liegen, erscheinen sie hier.", editor],
+      detached: ["code-branch", "Kein Branch aktiv", "Wähle einen Branch, damit Commits einen Platz haben.", button(icon("code-branch") + " Branch wählen", "menu", 'data-value="branch"')]
+    };
+    const [glyph, title, text, actions] = states[info.key] || states.clean;
+    const tone = info.key === "clean" ? "ok" : info.key === "ahead" || info.key === "publish" ? "accent" : info.key === "behind" || info.key === "detached" ? "warn" : info.key === "diverged" ? "danger" : "neutral";
+    const unpushed = g.upstream && g.branch ? g.ahead : 0;
+    const list = history?.error ? resourceError(history)
+      : !history ? '<p class="gw-list-empty">Commits werden geladen …</p>'
+      : commits.length ? commits.map((c, index) => `<button type="button" class="gw-calm-commit" data-gw="calm-commit" data-hash="${c.hash}"><code>${esc(c.shortHash)}</code><span>${esc(c.subject)}${index < unpushed ? ' <em class="gw-ref">noch nicht gepusht</em>' : ""}</span><small>${ago(c.date)}</small></button>`).join("")
+      : '<p class="gw-list-empty">Noch keine Commits.</p>';
+    return `<div class="gw-calm"><section class="gw-calm-main"><span class="gw-calm-icon tone-${tone}">${icon(glyph)}</span><h3>${title}</h3><p>${text}</p>${actions ? `<div class="gw-calm-actions">${actions}</div>` : ""}</section>
+      <section class="gw-calm-history"><header><span>Letzte Commits</span>${button("Ganzer Verlauf", "tab", 'data-value="history"', false, "gw-link")}</header><div class="gw-calm-commits">${list}</div></section></div>`;
+  }
   function changeView(p) {
     const s = session(p.id);
     const w = data(p.id, "workspace");
+    if (!p.git.files.length && !w?.operation) return calmView(p, w);
     if (s.advanced) return indexView(p);
     const files = p.git.files;
     const visible = files.filter(f => f.path.toLocaleLowerCase().includes(s.fileQuery.toLocaleLowerCase()));
@@ -470,7 +498,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
     const body = !repositories.length ? empty("code-branch", "Dein Git-Arbeitsbereich", "Klone ein Repository oder aktiviere Git in einem vorhandenen Projekt.", button("Repository hinzufügen", "add", "", false, "gw-primary"))
       : showOverview ? overviewView(repositories)
       : header(p, w) + guide(p, w) + navigation(p, w) + (notice?.id === p.id ? `<div class="gw-notice ${notice.error ? "error" : "success"}" role="${notice.error ? "alert" : "status"}">${icon(notice.error ? "circle-exclamation" : "circle-check")}<span>${esc(notice.message)}</span>${button(icon("xmark"), "dismiss-notice", 'aria-label="Meldung schließen"', false, "gw-icon-button")}</div>` : "") + `<div class="gw-view" data-gw-scroll="view">${s.tab === "changes" ? changeView(p) : s.tab === "history" ? historyView(p) : s.tab === "branches" ? branchView(p, w) : s.tab === "stashes" ? stashView(p, w) : s.tab === "tags" ? tagsView(p, w) : settingsView(p, w)}</div>`;
-    const statusbar = `<footer class="gw-statusbar"><span>${busy ? icon("spinner fa-spin") + " Git-Aktion läuft …" : icon("circle-check") + " Bereit"}</span>${p && !showOverview ? `<span class="gw-mono">${esc(p.git.upstream || (p.git.remoteName ? "Noch kein Upstream" : "Lokales Repository"))}</span><span>${icon("arrow-up")} ${p.git.ahead} <i class="gw-footer-divider"></i>${icon("arrow-down")} ${p.git.behind}</span>${p.git.lastFetchAt ? `<span title="${esc(new Date(p.git.lastFetchAt).toLocaleString("de-DE"))}">Geholt ${ago(p.git.lastFetchAt)}</span>` : ""}` : ""}</footer>`;
+    const statusbar = `<footer class="gw-statusbar"><span>${busy ? icon("spinner fa-spin") + " Git-Aktion läuft …" : icon("circle-check") + " Bereit"}</span>${p && !showOverview ? `<span class="gw-mono">${esc(p.git.upstream || (p.git.remoteName ? "Noch kein Upstream" : "Lokales Repository"))}</span><span>${icon("arrow-up")} ${p.git.ahead} <i class="gw-footer-divider"></i>${icon("arrow-down")} ${p.git.behind}</span>` : ""}</footer>`;
     const html = `<div class="gw-shell ${menu ? "menu-open" : ""}"><main class="gw-main" aria-label="Git-Repository">${body}${statusbar}</main></div>`;
     if (root.__gwHtml !== html) {
       root.__gwHtml = html;
@@ -628,6 +656,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
     if (["editor", "terminal", "folder"].includes(action)) { projectAction(p.id, action); return; }
     if (action === "copy-file" || action === "copy-hash") { await navigator.clipboard.writeText(action === "copy-file" ? s.file : s.commit); toast("Kopiert."); return; }
     if (action === "commit-detail") { s.commit = target.dataset.hash; s.historyFile = ""; render(); ensure(p.id); return; }
+    if (action === "calm-commit") { Object.assign(s, { tab: "history", commit: target.dataset.hash, historyFile: "", historyQuery: "", historyAll: false }); render(); ensure(p.id); return; }
     if (action === "stage-file" || action === "unstage-file") { await run(action === "stage-file" ? "stage-files" : "unstage-files", { files: [target.dataset.path] }); return; }
     if (action === "hunk") {
       const section = data(p.id, `diff:${s.advanced ? "index" : "all"}:${s.file}`)?.sections?.find(section => section.scope === s.scope);

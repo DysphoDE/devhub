@@ -460,3 +460,29 @@
   .gw-table-row > .gw-mono,.gw-table-row > span:nth-child(3) { display: none; }
   .gw-overview { padding: 14px; }
 }
+
+/* Ruheansicht: ohne Änderungen eine Meldung und die letzten Commits, kein leeres Commit-Formular. */
+.gw-calm { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); min-height: 100%; background: var(--surface); }
+.gw-calm-main { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 36px 32px; border-right: 1px solid var(--line); }
+.gw-calm-main h3 { margin: 4px 0 0; color: var(--ink); font: 600 19px/1.3 var(--font-ui); letter-spacing: -.01em; text-wrap: balance; }
+.gw-calm-main p { max-width: 46ch; margin: 0; color: var(--muted); font-size: var(--type-body); line-height: 1.55; }
+.gw-calm-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 6px; }
+.gw-calm-icon { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 11px; font-size: 17px; color: var(--muted); background: var(--surface-soft); }
+.gw-calm-icon.tone-ok { color: #1e7a5f; background: #e2f5ee; }
+.gw-calm-icon.tone-accent { color: var(--gw-accent-dark); background: var(--gw-accent-soft); }
+.gw-calm-icon.tone-warn { color: #8a5a0f; background: #fdf3e2; }
+.gw-calm-icon.tone-danger { color: #a93838; background: #fdecec; }
+.gw-calm-history { display: flex; flex-direction: column; min-width: 0; padding: 22px 24px; }
+.gw-calm-history header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 8px; }
+.gw-calm-history header span { color: var(--quiet); font: 600 var(--type-micro)/1.4 var(--font-ui); letter-spacing: .08em; text-transform: uppercase; }
+.gw-calm-commits { display: flex; flex-direction: column; }
+.gw-calm-commit { display: grid; grid-template-columns: 70px minmax(0, 1fr) auto; align-items: baseline; gap: 12px; padding: 9px 4px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.gw-calm-commit:last-child { border-bottom: 0; }
+.gw-calm-commit:hover { background: var(--surface-soft); }
+.gw-calm-commit code { color: var(--muted); font: var(--type-caption)/1.4 var(--mono); }
+.gw-calm-commit span { color: var(--ink); font-size: var(--type-body); line-height: 1.4; overflow-wrap: anywhere; }
+.gw-calm-commit small { color: var(--muted); font-size: var(--type-caption); white-space: nowrap; }
+.gw-calm-commit:focus-visible { outline: 2px solid #6683ee; outline-offset: -2px; }
+@media (max-width: 900px) { .gw-calm { grid-template-columns: 1fr; } .gw-calm-main { border-right: 0; border-bottom: 1px solid var(--line); } }
+/* Lange Repository-Namen in der Seitenleiste brechen auf höchstens zwei Zeilen um. */
+.sidebar-git-repositories .gw-repo strong { white-space: normal; overflow: hidden; text-overflow: clip; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.3; overflow-wrap: anywhere; }
