@@ -86,6 +86,12 @@
             <input id="search" type="search" placeholder="Projekte durchsuchen …" autocomplete="off">
             <kbd id="search-shortcut">Strg K</kbd>
           </label>
+          <div class="wb-svc" id="svc">
+            <button id="svc-pill" class="wb-svc-pill" type="button" aria-expanded="false" aria-controls="svc-panel" aria-haspopup="dialog">
+              <i class="wb-dot" aria-hidden="true"></i><span id="svc-name">Dienste</span><small id="svc-state">werden geprüft</small>
+            </button>
+            <div id="svc-panel" class="wb-svc-panel" role="dialog" aria-label="Lokale Dienste" hidden></div>
+          </div>
           <button id="rescan" class="workspace-header-refresh" type="button" title="Workspace aktualisieren" aria-label="Workspace aktualisieren">
             <i class="fa-solid fa-rotate" aria-hidden="true"></i>
           </button>
@@ -102,41 +108,7 @@
       </nav>
 
       <div id="projects-page">
-        <section id="service-dock" class="service-dock" aria-labelledby="services-heading">
-        <div class="dock-heading">
-          <span class="dock-signal" aria-hidden="true"><i></i><i></i><i></i></span>
-          <div><p class="eyebrow">Service control</p><h2 id="services-heading" class="dock-title">Lokale Dienste</h2><strong id="service-summary">System wird geprüft …</strong></div>
-        </div>
-        <div class="service-track" id="service-track">
-          <div class="service-node" data-service="stack"><i></i><span id="stack-name">Stack</span><b id="stack-state">prüft</b></div>
-          <div class="track-line"></div>
-          <div class="service-node" data-service="web"><i></i><span>Web</span><b id="web-state">offline</b></div>
-          <div class="track-line"></div>
-          <div class="service-node" data-service="database"><i></i><span>Datenbank</span><b id="database-state">offline</b></div>
-          <div id="runtime-ports" class="runtime-ports"></div>
-        </div>
-        <div class="dock-controls">
-          <div class="dock-actions" id="stack-actions" aria-label="Lokalen Stack steuern">
-            <button id="stack-toggle" class="dock-button secondary offline">
-              <i class="fa-solid fa-power-off" aria-hidden="true"></i>
-              <span><small>Webserver</small><strong id="stack-toggle-label">Webserver starten</strong></span>
-            </button>
-            <button id="stack-open" class="dock-button secondary">
-              <i class="fa-regular fa-folder-open" aria-hidden="true"></i>
-              <span><small>Manager</small><strong id="stack-open-label">Öffnen</strong></span>
-            </button>
-            <button id="stack-reload" class="dock-button secondary">
-              <i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i>
-              <span><small>Konfiguration</small><strong id="stack-reload-label">Neu laden</strong></span>
-            </button>
-          </div>
-          <button id="runtime-details" class="topology-toggle" aria-expanded="false" aria-controls="runtime-topology">
-            <i class="fa-solid fa-diagram-project" aria-hidden="true"></i>
-            <span>Details</span><b aria-hidden="true">⌄</b>
-          </button>
-        </div>
-        <div id="runtime-topology" class="runtime-topology" hidden></div>
-        </section>
+        <div id="attention" class="wb-attention" role="status" hidden></div>
 
         <nav id="mobile-view-filters" class="mobile-filter-row" aria-label="Mobile Projektfilter">
         <button data-mobile-filter="all" class="active" aria-pressed="true">Alle</button>

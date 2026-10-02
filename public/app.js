@@ -23,7 +23,7 @@ const state = {
   recent: Array.isArray(storedRecent) ? storedRecent : [],
   expandedProjects: new Set(),
   activeProjectId: null,
-  runtimeExpanded: localStorage.getItem("devhub_runtime_expanded") === "true",
+  stackPending: null,
   gitCommitMessages: new Map(),
   gitSuggestedMessages: new Set(),
   gitSuggestionLoading: new Set(),
@@ -61,12 +61,9 @@ const elements = {
   techFilters: document.querySelector("#tech-filters"), mobileTech: document.querySelector("#mobile-tech"), clearTech: document.querySelector("#clear-tech"), activeFilter: document.querySelector("#active-filter"),
   categoryGroup: document.querySelector("#category-group"), categoryFilters: document.querySelector("#category-filters"),
   mobileCategory: document.querySelector("#mobile-category"), clearCategory: document.querySelector("#clear-category"),
-  stackName: document.querySelector("#stack-name"), stackState: document.querySelector("#stack-state"), webState: document.querySelector("#web-state"), databaseState: document.querySelector("#database-state"),
-  serviceSummary: document.querySelector("#service-summary"), runtimePorts: document.querySelector("#runtime-ports"), stackActions: document.querySelector("#stack-actions"),
-  stackToggle: document.querySelector("#stack-toggle"), stackToggleLabel: document.querySelector("#stack-toggle-label"),
-  stackOpen: document.querySelector("#stack-open"), stackOpenLabel: document.querySelector("#stack-open-label"), stackReload: document.querySelector("#stack-reload"), stackReloadLabel: document.querySelector("#stack-reload-label"),
+  svc: document.querySelector("#svc"), svcPill: document.querySelector("#svc-pill"), svcName: document.querySelector("#svc-name"), svcState: document.querySelector("#svc-state"),
+  svcPanel: document.querySelector("#svc-panel"), attention: document.querySelector("#attention"),
   discardDescription: document.querySelector("#git-discard-description"), discardWarning: document.querySelector("#git-discard-warning-text"),
-  serviceDock: document.querySelector("#service-dock"), runtimeDetails: document.querySelector("#runtime-details"), runtimeTopology: document.querySelector("#runtime-topology"),
   projectDialog: document.querySelector("#project-dialog"), projectDialogContent: document.querySelector("#project-dialog-content"),
   discardDialog: document.querySelector("#git-discard-dialog"), discardCount: document.querySelector("#git-discard-count"), discardFiles: document.querySelector("#git-discard-files"),
   discardCancel: document.querySelector("#git-discard-cancel"), discardConfirm: document.querySelector("#git-discard-confirm"),
@@ -858,7 +855,10 @@ function renderWorkspaceNavigation() {
   elements.search.placeholder = `${searchLabel} …`;
   document.querySelector("#workspace-primary-label").textContent = gitActive ? "Repository hinzufügen" : "Workspace auswählen";
   document.querySelector("#workspace-primary-icon").className = gitActive ? "fa-solid fa-plus" : "fa-regular fa-folder-open";
-  if (!gitActive) document.querySelector("#workspace-primary-action").disabled = false;
+  const primary = document.querySelector("#workspace-primary-action");
+  primary.hidden = !gitActive;
+  if (!gitActive) primary.disabled = false;
+  elements.svc.hidden = gitActive;
 }
 
 async function loadGitCommitSuggestion(projectId, force = false) {
@@ -978,23 +978,6 @@ function openProjectDetails(projectId) {
   renderStats();
 }
 
-function renderRuntimeTopology() {
-  const routes = [];
-  if (state.stack?.webServer) {
-    routes.push(`<div class="topology-route system-route"><span class="topology-source"><i></i>${escapeHtml(state.stack.webServer)}</span><span class="topology-line"></span><strong>${state.stack.sites} lokale Domains</strong><code>:80</code></div>`);
-  }
-  state.projects.forEach((project) => project.launchers
-    .filter((launcher) => launcher.runtime.status === "running")
-    .forEach((launcher) => {
-      const source = launcher.kind === "php-server" ? "PHP" : launcher.kind === "static-server" ? "Static" : project.technologies.includes("Python") ? "Python" : "Node";
-      const endpoint = runtimePort(launcher) || "live";
-      routes.push(`<div class="topology-route"><span class="topology-source"><i></i>${source}</span><span class="topology-line"></span><button data-open-details="${project.id}">${escapeHtml(project.name)}</button>${launcher.runtime.url ? `<a href="${escapeHtml(launcher.runtime.url)}" data-open-id="${project.id}" target="_blank" rel="noopener noreferrer">${escapeHtml(endpoint)} ↗</a>` : `<code>${escapeHtml(endpoint)}</code>`}</div>`);
-    }));
-  elements.runtimeTopology.innerHTML = routes.length
-    ? `<div class="topology-head"><span>Lokaler Dienst</span><span>Route</span><span>Ziel</span></div>${routes.slice(0, 9).join("")}${routes.length > 9 ? `<p class="topology-more">${routes.length - 9} weitere aktive Routen</p>` : ""}`
-    : '<p class="topology-empty">Noch keine aktive Route. Starte ein Projekt, dann erscheint hier seine Verbindung zum lokalen Dienst und Port.</p>';
-}
-
 function renderStats() {
   const launchers = state.projects.flatMap((project) => project.launchers);
   const running = launchers.filter((launcher) => launcher.runtime.status === "running").length;
@@ -1042,55 +1025,95 @@ function stackAction(id) {
   return state.stack?.actions?.find((action) => action.id === id) || null;
 }
 
-function renderServiceDock() {
+function hostList(urls) {
+  const hosts = urls.map((url) => { try { return new URL(url).host; } catch { return url; } });
+  if (hosts.length <= 2) return hosts.join(" und ");
+  return `${hosts.slice(0, 2).join(", ")} und ${hosts.length - 2} weitere`;
+}
+
+// Projekte, deren Adresse der lokale Webserver ausliefert. Ist er aus, sind genau diese nicht erreichbar.
+function stackDependentProjects() {
+  return state.projects.filter((project) => project.defaultUrl);
+}
+
+function runningLaunchers() {
+  return state.projects.flatMap((project) => project.launchers
+    .filter((launcher) => launcher.runtime.status === "running")
+    .map((launcher) => ({ project, launcher })));
+}
+
+function servicePanelHtml() {
   const stack = state.stack;
-  if (!stack) return;
-  const runtimeErrors = state.projects.flatMap((project) => project.launchers).filter((launcher) => launcher.runtime.status === "error").length;
-  if (runtimeErrors) state.runtimeExpanded = true;
-  const nodes = { stack: stack.appRunning, web: Boolean(stack.webServer), database: Boolean(stack.database) };
-  Object.entries(nodes).forEach(([service, online]) => document.querySelector(`[data-service="${service}"]`)?.classList.toggle("online", online));
-  elements.stackName.textContent = stack.name;
-  elements.stackState.textContent = !stack.installed ? "fehlt" : stack.appRunning ? "geöffnet" : "bereit";
-  elements.webState.textContent = stack.webServer || "offline";
-  elements.databaseState.textContent = stack.database || "offline";
-  elements.serviceSummary.textContent = stack.webServer
-    ? `${stack.webServer} versorgt ${stack.sites} lokale Domain${stack.sites === 1 ? "" : "s"}`
-    : !stack.installed ? "Kein lokaler Stack erkannt · Laragon, Herd oder Valet einrichten"
-    : stack.appRunning ? `${stack.name} ist offen · Dienste warten auf Start` : `${stack.name} ist bereit, aber noch geschlossen`;
-  const webRunning = webOnline();
-  const startAction = stackAction("start");
-  const stopAction = stackAction("stop");
-  const openAction = stackAction("open");
-  const reloadAction = stackAction("reload");
-  elements.stackActions.hidden = !stack.installed || !stack.actions?.length;
-  elements.stackToggle.hidden = !(startAction || stopAction);
-  elements.stackToggle.disabled = !stack.installed || (webRunning ? !stopAction : !startAction);
-  elements.stackToggleLabel.textContent = webRunning ? (stopAction?.label || `${stack.webServerName} stoppen`) : (startAction?.label || `${stack.webServerName} starten`);
-  elements.stackToggle.title = (webRunning ? stopAction : startAction)?.description || "";
-  elements.stackToggle.classList.toggle("online", webRunning);
-  elements.stackToggle.classList.toggle("offline", !webRunning);
-  elements.stackOpen.hidden = !openAction;
-  elements.stackOpen.disabled = !stack.installed;
-  elements.stackOpenLabel.textContent = stack.appRunning ? `Zu ${stack.name}` : openAction?.label || `${stack.name} öffnen`;
-  elements.stackOpen.title = openAction?.description || "";
-  elements.stackReload.hidden = !reloadAction;
-  elements.stackReload.disabled = !stack.installed;
-  elements.stackReloadLabel.textContent = reloadAction?.label || "Neu laden";
-  elements.stackReload.title = reloadAction?.description || "";
-  const runningUrls = state.projects.flatMap((project) => project.launchers)
-    .filter((launcher) => launcher.runtime.status === "running" && launcher.runtime.url)
-    .map((launcher) => launcher.runtime.url);
-  elements.runtimePorts.innerHTML = [...new Set(runningUrls)].slice(0, 4).map((url) => {
-    let label = "live";
-    try { label = `:${new URL(url).port || (url.startsWith("https:") ? "443" : "80")}`; } catch { /* keep label */ }
-    return `<a class="port-chip" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
-  }).join("");
-  elements.serviceDock.classList.toggle("expanded", state.runtimeExpanded);
-  elements.serviceDock.classList.toggle("has-issues", runtimeErrors > 0);
-  elements.runtimeDetails.setAttribute("aria-expanded", String(state.runtimeExpanded));
-  elements.runtimeDetails.querySelector("span").textContent = runtimeErrors ? `${runtimeErrors} Problem${runtimeErrors === 1 ? "" : "e"}` : "Topologie";
-  elements.runtimeTopology.hidden = !state.runtimeExpanded;
-  renderRuntimeTopology();
+  if (!stack) return '<p class="wb-svc-note">Dienste werden geprüft …</p>';
+  const running = runningLaunchers();
+  const runningList = running.length ? `<div class="wb-svc-block"><span class="wb-label">Laufende Starter</span>${running.map(({ project, launcher }) => `<div class="wb-svc-route"><button type="button" data-open-details="${project.id}">${escapeHtml(project.name)}<small>${escapeHtml(launcher.name)}</small></button>${launcher.runtime.url ? `<a href="${escapeHtml(launcher.runtime.url)}" data-open-id="${project.id}" target="_blank" rel="noopener noreferrer">${escapeHtml(runtimePort(launcher) || "öffnen")} <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a>` : ""}</div>`).join("")}</div>` : "";
+  if (!stack.installed) {
+    return `<div class="wb-svc-head"><i class="fa-solid fa-server" aria-hidden="true"></i><strong>Kein lokaler Stack</strong></div>
+      <p class="wb-svc-note">DevHub hat weder Laragon noch Herd noch Valet gefunden. Projekte mit eigenem Starter laufen trotzdem.</p>${runningList}`;
+  }
+  const web = webOnline();
+  const rows = [
+    [stack.webServerName || "Webserver", web ? "läuft" : "aus", web],
+    ["Datenbank", stack.database || "nicht aktiv", Boolean(stack.database)],
+    ...(stack.mail ? [["Mail", "aktiv", true]] : []),
+    [`${stack.name}-App`, stack.appRunning ? "geöffnet" : "geschlossen", stack.appRunning]
+  ];
+  const dependent = stackDependentProjects();
+  const why = web
+    ? (dependent.length ? `${dependent.length === 1 ? "Die lokale Adresse ist" : `Alle ${dependent.length} lokalen Adressen sind`} erreichbar.` : `${stack.webServerName || "Der Webserver"} läuft.`)
+    : dependent.length ? `Ohne ${escapeHtml(stack.webServerName || "Webserver")} ${dependent.length === 1 ? "ist" : "sind"} ${escapeHtml(hostList(dependent.map((project) => project.defaultUrl)))} nicht erreichbar.`
+    : "Kein Projekt braucht gerade den Webserver.";
+  const toggle = stackAction(web ? "stop" : "start");
+  const open = stackAction("open");
+  const reload = stackAction("reload");
+  const pending = state.stackPending;
+  return `<div class="wb-svc-head"><i class="fa-solid fa-server" aria-hidden="true"></i><strong>${escapeHtml(stack.name)}</strong><small>${stack.sites ? `${stack.sites} ${stack.sites === 1 ? "Site" : "Sites"}${stack.tld ? ` unter .${escapeHtml(stack.tld)}` : ""}` : "keine Sites"}</small></div>
+    <div class="wb-svc-list">${rows.map(([name, label, on]) => `<div class="wb-svc-row"><i class="wb-dot ${on ? "on" : ""}" aria-hidden="true"></i><span>${escapeHtml(name)}</span><small>${escapeHtml(label)}</small></div>`).join("")}</div>
+    <p class="wb-svc-note">${why}</p>
+    <div class="wb-svc-actions">
+      ${toggle ? `<button type="button" class="wb-btn ${web ? "" : "primary"}" data-stack-action="${web ? "stop" : "start"}" title="${escapeHtml(toggle.description)}" ${pending ? "disabled" : ""}>${pending === "start" || pending === "stop" ? '<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>' : ""}${web ? "Dienste stoppen" : "Dienste starten"}</button>` : ""}
+      ${reload ? `<button type="button" class="wb-btn" data-stack-action="reload" title="${escapeHtml(reload.description)}" ${pending ? "disabled" : ""}>Neu starten</button>` : ""}
+      ${open ? `<button type="button" class="wb-btn" data-stack-action="open" title="${escapeHtml(open.description)}" ${pending ? "disabled" : ""}>${escapeHtml(stack.name)} öffnen</button>` : ""}
+    </div>${toggle?.description && !web ? `<p class="wb-svc-foot">${escapeHtml(toggle.description)}</p>` : ""}${runningList}`;
+}
+
+function renderServices() {
+  const stack = state.stack;
+  const web = webOnline();
+  const tone = !stack ? "" : !stack.installed ? "none" : web ? "ok" : stackDependentProjects().length ? "warn" : "idle";
+  elements.svcPill.dataset.tone = tone;
+  elements.svcName.textContent = !stack ? "Dienste" : stack.installed ? stack.name : "Kein Stack";
+  elements.svcState.textContent = !stack ? "werden geprüft" : !stack.installed ? "nur eigene Starter" : web ? "läuft" : `${stack.webServerName || "Webserver"} aus`;
+  elements.svcPill.title = !stack ? "" : stack.installed ? `${stack.name}: ${web ? `${stack.webServerName} läuft` : `${stack.webServerName} ist aus`}` : "Kein lokaler Stack erkannt";
+  if (!elements.svcPanel.hidden) {
+    const html = servicePanelHtml();
+    if (elements.svcPanel.__devhubHtml !== html) { elements.svcPanel.__devhubHtml = html; elements.svcPanel.innerHTML = html; }
+  }
+  renderAttention();
+}
+
+function renderAttention() {
+  const stack = state.stack;
+  const items = [];
+  const dependent = stackDependentProjects();
+  if (stack?.installed && !webOnline() && dependent.length && state.page === "projects") {
+    const start = stackAction("start");
+    items.push(`<div class="wb-attention-item warn"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><p><b>${escapeHtml(stack.webServerName || "Der Webserver")} ist aus.</b> Deshalb ${dependent.length === 1 ? "ist" : "sind"} ${escapeHtml(hostList(dependent.map((project) => project.defaultUrl)))} gerade nicht erreichbar.</p>${start ? `<button type="button" class="wb-btn primary" data-stack-action="start" ${state.stackPending ? "disabled" : ""}>${state.stackPending === "start" ? '<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>' : ""}Dienste starten</button>` : ""}</div>`);
+  }
+  const failed = state.projects.flatMap((project) => project.launchers.filter((launcher) => launcher.runtime.status === "error").map((launcher) => ({ project, launcher })));
+  if (failed.length) {
+    const first = failed[0];
+    items.push(`<div class="wb-attention-item danger"><i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i><p><b>${failed.length === 1 ? "Ein Starter ist" : `${failed.length} Starter sind`} abgebrochen.</b> ${escapeHtml(first.project.name)} · ${escapeHtml(first.launcher.name)}${first.launcher.runtime.message ? `: ${escapeHtml(first.launcher.runtime.message)}` : ""}</p><button type="button" class="wb-btn" data-log="${first.launcher.id}">Log ansehen</button></div>`);
+  }
+  const html = items.join("");
+  if (elements.attention.__devhubHtml !== html) { elements.attention.__devhubHtml = html; elements.attention.innerHTML = html; }
+  elements.attention.hidden = !items.length;
+}
+
+function setServicePanel(open) {
+  elements.svcPanel.hidden = !open;
+  elements.svcPill.setAttribute("aria-expanded", String(open));
+  if (open) { elements.svcPanel.__devhubHtml = null; renderServices(); }
 }
 
 const cardTemplate = document.createElement("template");
@@ -1202,7 +1225,7 @@ function render(preserveFocus = true) {
   renderStats();
   renderCategoryFilters();
   renderTechFilters();
-  renderServiceDock();
+  renderServices();
   renderGitPage();
   renderWorkspaceNavigation();
   document.querySelectorAll("[data-view]").forEach((button) => { button.classList.toggle("active", button.dataset.view === state.view); button.setAttribute("aria-pressed", String(button.dataset.view === state.view)); });
@@ -1335,7 +1358,7 @@ async function saveWorkspace(event) {
 }
 
 async function refreshStack() {
-  try { state.stack = (await api("/api/stack/status")).stack; renderServiceDock(); } catch { /* next poll retries */ }
+  try { state.stack = (await api("/api/stack/status")).stack; renderServices(); } catch { /* next poll retries */ }
 }
 
 function webOnline() {
@@ -1356,17 +1379,17 @@ function applyTrashCapability() {
 }
 
 async function runStackAction(action) {
-  const pending = action === "start" || action === "stop";
-  if (pending) elements.stackToggle.disabled = true;
+  if (state.stackPending) return;
+  state.stackPending = action;
+  renderServices();
   try {
     const data = await api(`/api/stack/${action}`, { method: "POST" });
     state.stack = data.stack;
-    renderServiceDock();
     toast(data.message);
     if (action === "reload") setTimeout(rescan, 1100);
-    if (pending) setTimeout(refreshStack, 2500);
+    if (action === "start" || action === "stop") setTimeout(refreshStack, 2500);
   } catch (error) { toast(error.message, "error"); }
-  finally { if (pending) elements.stackToggle.disabled = false; }
+  finally { state.stackPending = null; renderServices(); }
 }
 
 async function runProjectAction(projectId, action) {
@@ -1643,7 +1666,6 @@ elements.grid.addEventListener("click", (event) => {
   if (heading) { setCategoryFilter(state.category === heading.dataset.groupFilter ? null : heading.dataset.groupFilter); return; }
   handleProjectInteraction(event);
 });
-elements.runtimeTopology.addEventListener("click", handleProjectInteraction);
 elements.gitPage.addEventListener("click", (event) => {
   const filter = event.target.closest("[data-git-filter]");
   if (filter) {
@@ -1773,12 +1795,21 @@ elements.workspaceForm.addEventListener("submit", saveWorkspace);
 document.querySelector("#workspace-close").addEventListener("click", () => elements.workspaceDialog.close());
 document.querySelector("#workspace-cancel").addEventListener("click", () => elements.workspaceDialog.close());
 elements.workspaceDialog.addEventListener("click", (event) => { if (event.target === elements.workspaceDialog) elements.workspaceDialog.close(); });
-elements.stackToggle.addEventListener("click", () => runStackAction(webOnline() ? "stop" : "start"));
-elements.stackOpen.addEventListener("click", () => runStackAction("open")); elements.stackReload.addEventListener("click", () => runStackAction("reload"));
-elements.runtimeDetails.addEventListener("click", () => {
-  state.runtimeExpanded = !state.runtimeExpanded;
-  localStorage.setItem("devhub_runtime_expanded", String(state.runtimeExpanded));
-  renderServiceDock();
+elements.svcPill.addEventListener("click", () => setServicePanel(elements.svcPanel.hidden));
+document.addEventListener("click", (event) => {
+  const stackButton = event.target.closest("[data-stack-action]");
+  if (stackButton && !stackButton.disabled) { runStackAction(stackButton.dataset.stackAction); return; }
+  if (!elements.svcPanel.hidden && !elements.svc.contains(event.target)) setServicePanel(false);
+});
+elements.svcPanel.addEventListener("click", (event) => {
+  const details = event.target.closest("[data-open-details]");
+  if (details) { setServicePanel(false); openProjectDetails(details.dataset.openDetails); return; }
+  const opened = event.target.closest("[data-open-id]");
+  if (opened) markRecent(opened.dataset.openId);
+});
+elements.attention.addEventListener("click", (event) => {
+  const log = event.target.closest("[data-log]");
+  if (log) openLogs(log.dataset.log);
 });
 document.querySelector("#mobile-search").addEventListener("click", () => { elements.search.scrollIntoView({ block: "center" }); elements.search.focus(); });
 document.querySelector("#close-log").addEventListener("click", () => elements.logDialog.close());
@@ -1805,6 +1836,7 @@ document.querySelector("#clear-log").addEventListener("click", () => { elements.
 elements.restartLog.addEventListener("click", () => { if (state.activeLogId) runLauncher(state.activeLogId, "restart"); });
 elements.logDialog.addEventListener("close", () => { state.activeLogId = null; }); elements.logDialog.addEventListener("click", (event) => { if (event.target === elements.logDialog) elements.logDialog.close(); });
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !elements.svcPanel.hidden) { setServicePanel(false); elements.svcPill.focus(); return; }
   if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "k") { event.preventDefault(); elements.search.focus(); elements.search.select(); }
   if (event.key === "/" && !["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) { event.preventDefault(); elements.search.focus(); }
 });
