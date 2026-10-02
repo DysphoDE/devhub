@@ -22,7 +22,6 @@ const state = {
   group: localStorage.getItem("devhub_group") === "category" ? "category" : "none",
   favorites: new Set(Array.isArray(storedFavorites) ? storedFavorites : []),
   recent: Array.isArray(storedRecent) ? storedRecent : [],
-  expandedProjects: new Set(),
   selectedProjectId: localStorage.getItem("devhub_selected_project") || null,
   panelOpen: false,
   panelDismissed: false,
@@ -265,35 +264,6 @@ function getVisibleProjects() {
   return projects;
 }
 
-function launcherRow(launcher) {
-  const runtime = launcher.runtime;
-  const busy = ["starting", "stopping"].includes(runtime.status);
-  const action = runtime.status === "running" ? "stop" : "start";
-  return `<div class="launcher-row" data-launcher="${launcher.id}">
-    <div class="launcher-copy"><span class="launcher-name">${escapeHtml(launcher.name)}</span><code class="launcher-command" title="${escapeHtml(launcher.command)}">${escapeHtml(launcher.command)}${launcher.parts?.length ? ` · startet ${launcher.parts.length} Teile` : ""}</code>${launcherParts(launcher)}</div>
-    <span class="launcher-status ${runtime.status}">${statusLabels[runtime.status] || runtime.status}</span>
-    <div class="launcher-tools">
-      ${runtime.url && runtime.status === "running" ? `<a class="mini-action" href="${escapeHtml(runtime.url)}" data-open-id="${launcher.projectId}" target="_blank" rel="noopener noreferrer" aria-label="Im Browser öffnen"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i><span class="mini-label">Browser</span></a>` : ""}
-      <button class="mini-action" data-log="${launcher.id}" data-focus-key="log-${launcher.id}" aria-label="Logs anzeigen"><i class="fa-solid fa-terminal" aria-hidden="true"></i><span class="mini-label">Logs</span></button>
-      <button class="mini-action ${action === "stop" ? "stop" : ""} ${busy ? "busy" : ""}" data-launcher-action="${action}" data-id="${launcher.id}" data-focus-key="run-${launcher.id}" ${busy ? "disabled" : ""} aria-label="${action === "stop" ? "Stoppen" : "Starten"}"><i class="fa-solid ${busy ? "fa-spinner fa-spin" : action === "stop" ? "fa-stop" : "fa-play"}" aria-hidden="true"></i><span class="mini-label">${action === "stop" ? "Stoppen" : "Starten"}</span></button>
-    </div>
-  </div>`;
-}
-
-function primaryAction(project, compact = false) {
-  const url = browserUrl(project);
-  if (url) return `<a class="primary-card-action running" href="${escapeHtml(url)}" data-open-id="${project.id}" target="_blank" rel="noopener noreferrer"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>${compact ? "Browser" : "Browser öffnen"}</a>`;
-  const launcher = preferredLauncher(project);
-  if (launcher) {
-    const running = launcher.runtime.status === "running";
-    const busy = ["starting", "stopping"].includes(launcher.runtime.status);
-    const label = busy ? "Bitte warten …" : running ? "Stoppen" : "Starten";
-    const title = `${escapeHtml(launcher.name)} ${running ? "stoppen" : "starten"} · ${escapeHtml(launcher.command)}`;
-    return `<button class="primary-card-action ${running ? "running" : ""}" data-launcher-action="${running ? "stop" : "start"}" data-id="${launcher.id}" data-project-id="${project.id}" title="${title}" ${busy ? "disabled" : ""}><i class="fa-solid ${busy ? "fa-spinner fa-spin" : running ? "fa-stop" : "fa-play"}" aria-hidden="true"></i>${label}</button>`;
-  }
-  return `<button class="primary-card-action folder" data-project-action="folder" data-project-id="${project.id}"><i class="fa-regular fa-folder-open" aria-hidden="true"></i>${compact ? "Ordner" : "Ordner öffnen"}</button>`;
-}
-
 function gitConflictCount(git) {
   const conflictStates = new Set(["DD", "AU", "UD", "UA", "DU", "AA", "UU"]);
   return git.files?.filter((file) => conflictStates.has(`${file.indexStatus}${file.worktreeStatus}`)).length || 0;
@@ -310,53 +280,6 @@ function gitStatusPresentation(git) {
   if (git.dirty) return { kind: "changes", label: `${changed}${git.filesTruncated ? "+" : ""} Änderung${changed === 1 ? "" : "en"}`, title: `${changed} Dateien mit offenen Änderungen` };
   if (git.ahead || git.behind) return { kind: git.behind ? "behind" : "ahead", label: `${git.ahead ? `↑${git.ahead}` : ""}${git.ahead && git.behind ? " · " : ""}${git.behind ? `↓${git.behind}` : ""}`, title: "Abstand zum Upstream" };
   return { kind: "clean", label: "sauber", title: "Keine lokalen Git-Änderungen" };
-}
-
-function gitBranchMeta(git) {
-  const status = gitStatusPresentation(git);
-  return `<span class="meta-item git-meta ${status.kind}" title="${escapeHtml(status.title)}">
-    <i class="fa-solid fa-code-branch git-branch-icon" aria-hidden="true"></i>
-    <code>${escapeHtml(git.branch || "detached")}</code><span class="git-inline-status"><i></i>${escapeHtml(status.label)}</span>
-  </span>`;
-}
-
-function projectCard(project) {
-  const running = projectIsRunning(project);
-  const status = projectState(project);
-  const [symbol, className] = techClass(project);
-  const expanded = state.expandedProjects.has(project.id);
-  const focusedLauncher = preferredLauncher(project);
-  const top = topLaunchers(project);
-  const visibleLaunchers = expanded ? top : focusedLauncher ? [focusedLauncher] : [];
-  const favorite = state.favorites.has(project.id);
-  const editorName = state.capabilities?.editor.name || "Editor";
-  return `<article class="project-card ${className} ${running ? "running" : ""}" data-project="${project.id}" tabindex="0" aria-label="Details zu ${escapeHtml(project.name)} öffnen">
-    <div class="card-accent"></div>
-    <div class="card-body">
-      <div class="card-kicker">
-        ${project.thumbnailUrl ? `<img class="card-thumb" src="${escapeHtml(project.thumbnailUrl)}" alt="">` : `<span class="stack-symbol">${escapeHtml(symbol)}</span>`}
-        <span class="card-state ${status.kind}"><i></i>${escapeHtml(status.label)}</span>
-        <button class="favorite-button ${favorite ? "active" : ""}" data-favorite="${project.id}" data-focus-key="fav-${project.id}" aria-label="${favorite ? "Aus Favoriten entfernen" : "Zu Favoriten hinzufügen"}" aria-pressed="${favorite}">${favoriteIcon(favorite)}</button>
-      </div>
-      <h2 title="${escapeHtml(project.name)}">${escapeHtml(project.name)}</h2>
-      <code class="project-path" title="${escapeHtml(project.relativePath)}">${escapeHtml(project.relativePath)}</code>
-      ${domainLink(project, "card-domain")}
-      ${project.descriptionAuto ? "" : `<p class="project-description">${escapeHtml(project.description)}</p>`}
-      <div class="tech-list">${project.technologies.slice(0, 5).map((technology) => `<span class="tech-chip">${escapeHtml(technology)}</span>`).join("")}</div>
-      <div class="card-meta">
-        ${project.git ? gitBranchMeta(project.git) : `<span class="meta-item">${project.fileCount} Dateien</span>`}
-        <span class="meta-time">${relativeTime(project.modifiedAt)}</span>
-      </div>
-    </div>
-    ${top.length ? `<div class="launcher-panel focused-launcher-panel"><div class="launcher-panel-label"><span>${expanded ? "Alle Starter" : "Bevorzugter Starter"}</span><b>${top.length}</b></div>${visibleLaunchers.map(launcherRow).join("")}${top.length > 1 ? `<button class="more-launchers" data-expand="${project.id}">${expanded ? "Auf bevorzugten Starter reduzieren" : `${top.length - 1} weitere Starter anzeigen`}</button>` : ""}</div>` : ""}
-    <div class="card-actions">
-      ${primaryAction(project)}
-      <button class="card-icon-action" data-project-action="editor" data-project-id="${project.id}" aria-label="In ${escapeHtml(editorName)} öffnen" ${state.capabilities?.editor.available ? "" : "disabled"}><i class="fa-solid fa-code" aria-hidden="true"></i><b>Editor</b></button>
-      <button class="card-icon-action" data-project-action="terminal" data-project-id="${project.id}" aria-label="Terminal hier öffnen" ${state.capabilities?.terminal.available ? "" : "disabled"}><i class="fa-solid fa-terminal" aria-hidden="true"></i><b>Terminal</b></button>
-      <button class="card-icon-action" data-project-action="folder" data-project-id="${project.id}" aria-label="Ordner öffnen"><i class="fa-regular fa-folder-open" aria-hidden="true"></i><b>Ordner</b></button>
-      <button class="card-icon-action" data-copy-path="${project.id}" aria-label="Pfad kopieren"><i class="fa-regular fa-copy" aria-hidden="true"></i><b>Pfad</b></button>
-    </div>
-  </article>`;
 }
 
 function renderPatch(patch) {
@@ -440,7 +363,8 @@ function rowAction(project) {
   return `<button type="button" class="wb-btn" data-project-action="folder" data-project-id="${project.id}"><i class="fa-regular fa-folder-open" aria-hidden="true"></i>Ordner</button>`;
 }
 
-function projectRow(project) {
+// Gemeinsame Bausteine für Listenzeile und Kachel, damit beide Ansichten dasselbe zeigen und dieselbe Hauptaktion haben.
+function projectBits(project) {
   const launcher = activeLauncher(project);
   const failed = project.launchers.find((item) => item.runtime.status === "error");
   const status = project.isSelf ? "self" : launcher?.runtime.status === "running" ? "run" : launcher ? "busy" : failed ? "error" : "";
@@ -448,19 +372,40 @@ function projectRow(project) {
   const live = project.isSelf ? `<span class="wb-live">diese Instanz · ${escapeHtml(location.host)}</span>`
     : launcher ? `<span class="wb-live">${escapeHtml(launcher.name)}${launcher.runtime.url ? ` · ${escapeHtml(displayUrl(launcher.runtime.url))}` : ` · ${statusLabels[launcher.runtime.status]}`}</span>`
     : failed ? `<span class="wb-live error">${escapeHtml(failed.name)} · abgebrochen</span>` : "";
-  const domain = domainLink(project);
   const tech = project.technologies.slice(0, 3);
   const more = project.technologies.length - tech.length;
+  const techs = `<span class="wb-techs">${tech.map((technology) => `<span class="wb-tech">${escapeHtml(technology)}</span>`).join("")}${more > 0 ? `<span class="wb-tech" title="${escapeHtml(project.technologies.slice(3).join(", "))}">+${more}</span>` : ""}</span>`;
   const git = project.git ? gitStatusPresentation(project.git) : null;
-  const favorite = state.favorites.has(project.id);
-  // Die Auswahl setzt renderPanel nachträglich, damit Zeilen beim Wechseln nicht neu entstehen und den Fokus behalten.
-  return `<article class="wb-row ${status}" data-project="${project.id}" tabindex="0" role="button" aria-pressed="false" aria-label="${escapeHtml(project.name)}">
-    <span class="wb-status ${status}" title="${statusTitle}"></span>
-    <span class="wb-row-name"><strong>${escapeHtml(project.name)}${favorite ? ' <i class="fa-solid fa-star wb-fav" aria-label="Favorit"></i>' : ""}</strong><small>${domain}<span>${escapeHtml(project.relativePath)}</span>${live}</small></span>
-    <span class="wb-techs">${tech.map((technology) => `<span class="wb-tech">${escapeHtml(technology)}</span>`).join("")}${more > 0 ? `<span class="wb-tech" title="${escapeHtml(project.technologies.slice(3).join(", "))}">+${more}</span>` : ""}</span>
-    <span class="wb-git">${git ? `<i class="fa-solid fa-code-branch" aria-hidden="true"></i><code>${escapeHtml(project.git.branch || "detached")}</code><span class="wb-git-state ${git.kind}" title="${escapeHtml(git.title)}">${escapeHtml(git.label)}</span>` : '<span class="wb-quiet">kein Git</span>'}</span>
-    <span class="wb-when" title="${escapeHtml(dateTime(project.modifiedAt))}">${shortAgo(project.modifiedAt)}</span>
-    <span class="wb-row-act">${rowAction(project)}</span>
+  const gitHtml = `<span class="wb-git">${git ? `<i class="fa-solid fa-code-branch" aria-hidden="true"></i><code>${escapeHtml(project.git.branch || "detached")}</code><span class="wb-git-state ${git.kind}" title="${escapeHtml(git.title)}">${escapeHtml(git.label)}</span>` : '<span class="wb-quiet">kein Git</span>'}</span>`;
+  const when = `<span class="wb-when" title="${escapeHtml(dateTime(project.modifiedAt))}">${shortAgo(project.modifiedAt)}</span>`;
+  const favorite = state.favorites.has(project.id) ? ' <i class="fa-solid fa-star wb-fav" aria-label="Favorit"></i>' : "";
+  const sub = `${domainLink(project)}<span>${escapeHtml(project.relativePath)}</span>${live}`;
+  return { status, statusTitle, techs, gitHtml, when, favorite, sub, action: rowAction(project) };
+}
+
+// Die Auswahl setzt renderPanel nachträglich, damit Zeilen und Kacheln beim Wechseln nicht neu entstehen und den Fokus behalten.
+function projectRow(project) {
+  const bits = projectBits(project);
+  return `<article class="wb-row ${bits.status}" data-project="${project.id}" tabindex="0" role="button" aria-pressed="false" aria-label="${escapeHtml(project.name)}">
+    <span class="wb-status ${bits.status}" title="${bits.statusTitle}"></span>
+    <span class="wb-row-name"><strong>${escapeHtml(project.name)}${bits.favorite}</strong><small>${bits.sub}</small></span>
+    ${bits.techs}${bits.gitHtml}${bits.when}
+    <span class="wb-row-act">${bits.action}</span>
+  </article>`;
+}
+
+function projectTile(project) {
+  const bits = projectBits(project);
+  const [symbol, techTone] = techClass(project);
+  const mark = project.thumbnailUrl
+    ? `<img class="wb-tile-mark" src="${escapeHtml(project.thumbnailUrl)}" alt="">`
+    : `<span class="wb-tile-mark" aria-hidden="true">${escapeHtml(symbol)}</span>`;
+  return `<article class="wb-tile ${bits.status} ${techTone}" data-project="${project.id}" tabindex="0" role="button" aria-pressed="false" aria-label="${escapeHtml(project.name)}">
+    <header class="wb-tile-head">${mark}<span class="wb-status ${bits.status}" title="${bits.statusTitle}"></span></header>
+    <h3 class="wb-tile-name">${escapeHtml(project.name)}${bits.favorite}</h3>
+    <p class="wb-tile-sub">${bits.sub}</p>
+    ${bits.techs}
+    <footer class="wb-tile-foot"><div class="wb-tile-meta">${bits.gitHtml}${bits.when}</div><div class="wb-tile-act">${bits.action}</div></footer>
   </article>`;
 }
 
@@ -584,14 +529,14 @@ const widePanel = matchMedia("(min-width: 1180px)");
 // sonst erscheint er erst nach einer Auswahl als Ebene.
 function renderPanel(visibleProjects) {
   let project = state.projects.find((item) => item.id === state.selectedProjectId);
-  const listAutoPanel = widePanel.matches && state.view === "list" && !state.panelDismissed;
-  if (!project && listAutoPanel && visibleProjects.length) project = visibleProjects[0];
-  const show = state.page === "projects" && Boolean(project) && (state.panelOpen || listAutoPanel);
+  const autoPanel = widePanel.matches && !state.panelDismissed;
+  if (!project && autoPanel && visibleProjects.length) project = visibleProjects[0];
+  const show = state.page === "projects" && Boolean(project) && (state.panelOpen || autoPanel);
   elements.panel.hidden = !show;
   document.querySelector(".app-shell").classList.toggle("with-panel", show);
   document.body.classList.toggle("wb-panel-overlay", show && !widePanel.matches);
   if (!show) {
-    elements.grid.querySelectorAll(".wb-row.selected").forEach((row) => { row.classList.remove("selected"); row.setAttribute("aria-pressed", "false"); });
+    elements.grid.querySelectorAll("[data-project].selected").forEach((row) => { row.classList.remove("selected"); row.setAttribute("aria-pressed", "false"); });
     return;
   }
   if (project.id !== state.selectedProjectId) state.selectedProjectId = project.id;
@@ -604,7 +549,7 @@ function renderPanel(visibleProjects) {
     if (openDetails) elements.panel.querySelector("details")?.setAttribute("open", "");
     elements.panel.scrollTop = scroll;
   }
-  elements.grid.querySelectorAll(".wb-row").forEach((row) => {
+  elements.grid.querySelectorAll("[data-project]").forEach((row) => {
     const selected = row.dataset.project === project.id;
     row.classList.toggle("selected", selected);
     row.setAttribute("aria-pressed", String(selected));
@@ -859,7 +804,7 @@ function groupHeading(group) {
 
 function gridEntries(projects) {
   const list = state.view === "list";
-  const renderer = list ? projectRow : projectCard;
+  const renderer = list ? projectRow : projectTile;
   const head = list && projects.length ? [{ key: "head", html: '<div class="wb-row-head" aria-hidden="true"><span></span><span>Projekt</span><span>Technik</span><span>Git</span><span>Geändert</span><span>Aktion</span></div>' }] : [];
   if (state.group !== "category") return [...head, ...projects.map((project) => ({ key: `project:${project.id}`, html: renderer(project) }))];
   const entries = [...head];
@@ -925,6 +870,7 @@ function render(preserveFocus = true) {
   elements.resultCount.closest(".result-label").hidden = !filtered;
   elements.resetFilters.hidden = !filtered;
   elements.grid.classList.toggle("wb-rows", state.view === "list");
+  elements.grid.classList.toggle("wb-tiles", state.view !== "list");
   elements.grid.classList.toggle("grouped", state.group === "category");
   elements.groupToggle.classList.toggle("active", state.group === "category");
   elements.groupToggle.setAttribute("aria-pressed", String(state.group === "category"));
@@ -1202,7 +1148,6 @@ function handleProjectInteraction(event) {
   const projectAction = event.target.closest("[data-project-action]");
   if (projectAction) { runProjectAction(projectAction.dataset.projectId, projectAction.dataset.projectAction); return; }
   const log = event.target.closest("[data-log]"); if (log) { openLogs(log.dataset.log); return; }
-  const expand = event.target.closest("[data-expand]"); if (expand) { state.expandedProjects.has(expand.dataset.expand) ? state.expandedProjects.delete(expand.dataset.expand) : state.expandedProjects.add(expand.dataset.expand); render(); return; }
   const copy = event.target.closest("[data-copy-path]");
   if (copy) { const project = state.projects.find((item) => item.id === copy.dataset.copyPath); if (project) copyToClipboard(projectPath(project), "Projektpfad kopiert."); return; }
   const copyValue = event.target.closest("[data-copy-value]");
@@ -1247,9 +1192,13 @@ elements.grid.addEventListener("keydown", (event) => {
     return;
   }
   // Pfeiltasten wandern durch die Zeilen und nehmen den Detailbereich mit.
-  if (card && event.target === card && ["ArrowDown", "ArrowUp"].includes(event.key)) {
+  if (card && event.target === card && ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(event.key)) {
     const rows = [...elements.grid.querySelectorAll("[data-project]")];
-    const next = rows[rows.indexOf(card) + (event.key === "ArrowDown" ? 1 : -1)];
+    const tiles = state.view !== "list";
+    if (!tiles && ["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+    const columns = tiles ? Math.max(1, getComputedStyle(elements.grid).gridTemplateColumns.split(" ").length) : 1;
+    const step = { ArrowDown: columns, ArrowUp: -columns, ArrowRight: 1, ArrowLeft: -1 }[event.key];
+    const next = rows[rows.indexOf(card) + step];
     if (next) { event.preventDefault(); openProjectDetails(next.dataset.project, { focusRow: true }); }
   }
 });

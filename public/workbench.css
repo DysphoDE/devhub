@@ -329,3 +329,28 @@ a.wb-domain:hover { text-decoration: underline; text-underline-offset: 2px; }
 .wb-addr-warn { color: var(--wb-warning-ink); }
 body.wb-compact .wb-row-name small:has(.wb-domain) { display: flex; }
 body.wb-compact .wb-row-name small .wb-domain + span::before { content: none; }
+
+/* Kachelansicht: dieselben Bausteine wie die Zeile, Details stehen im Detailbereich */
+.project-grid.wb-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; align-items: stretch; }
+.project-grid.wb-tiles .group-heading { grid-column: 1 / -1; margin: 10px 0 0; }
+.wb-tile { display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 214px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); cursor: pointer; transition: border-color .12s ease; }
+.wb-tile:hover { border-color: var(--line-strong); }
+.wb-tile.selected { border-color: var(--signal); box-shadow: inset 0 0 0 1px var(--signal); }
+.wb-tile.run:not(.selected) { border-color: color-mix(in srgb, var(--runtime) 45%, var(--line)); }
+.wb-tile:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+.wb-tile-head { display: flex; align-items: center; gap: 10px; }
+.wb-tile-head .wb-status { margin-left: auto; }
+.wb-tile-mark { width: 38px; height: 38px; flex: 0 0 38px; display: grid; place-items: center; border-radius: 10px; background: color-mix(in srgb, var(--accent, var(--muted)) 14%, var(--surface)); color: var(--accent, var(--muted)); font: 700 13px/1 var(--font-ui); object-fit: cover; }
+.wb-tile-name { margin: 2px 0 0; color: var(--ink); font: 600 15.5px/1.3 var(--display); letter-spacing: -.01em; text-wrap: balance; overflow-wrap: anywhere; }
+.wb-tile-sub { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin: -4px 0 0; color: var(--muted); font: var(--type-micro)/1.45 var(--mono); overflow-wrap: anywhere; }
+.wb-tile-sub .wb-live { color: var(--wb-runtime-ink); }
+.wb-tile-sub .wb-live.error { color: var(--wb-danger-ink); }
+.wb-tile-foot { display: flex; flex-direction: column; gap: 10px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); }
+.wb-tile-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.wb-tile-act { display: flex; align-items: center; gap: 6px; }
+.wb-tile-act > .wb-btn:first-child { flex: 1; }
+.wb-tile-act > .wb-quiet { padding: 7px 0; }
+body.wb-compact .wb-tile { min-height: 0; gap: 8px; padding: 12px 14px; }
+body.wb-compact .wb-tile > .wb-techs { display: none; }
+body.wb-compact .wb-tile-mark { width: 30px; height: 30px; flex-basis: 30px; border-radius: 8px; font-size: 12px; }
+body.wb-compact .wb-tile-sub > span:not(.wb-live):not(.wb-domain) { display: none; }
