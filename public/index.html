@@ -35,37 +35,22 @@
         <nav id="view-filters" class="side-nav">
           <button class="side-link active" aria-label="Alle Projekte" title="Alle Projekte" data-filter="all" data-page="projects" aria-pressed="true"><span class="side-icon"><i class="fa-solid fa-house" aria-hidden="true"></i></span><span>Projekte</span><b id="all-count">0</b></button>
           <button class="side-link git-page-link" aria-label="Git-Zentrale" title="Git-Zentrale" data-page="git" aria-pressed="false"><span class="side-icon"><i class="fa-solid fa-code-branch" aria-hidden="true"></i></span><span>Git-Zentrale</span><b id="git-repository-count">0</b></button>
-          <span class="side-nav-divider" aria-hidden="true"></span><span class="side-context-label project-filter-link">Projektansichten</span>
-          <button class="side-link attention-link project-filter-link" data-filter="attention" data-page="projects" aria-pressed="false"><span class="side-icon attention-icon"><i class="fa-solid fa-exclamation" aria-hidden="true"></i></span><span>Aufmerksamkeit</span><b id="attention-count">0</b></button>
-          <button class="side-link project-filter-link" data-filter="favorites" data-page="projects" aria-pressed="false"><span class="side-icon"><i class="fa-regular fa-star" aria-hidden="true"></i></span><span>Favoriten</span><b id="favorite-count">0</b></button>
-          <button class="side-link project-filter-link" data-filter="recent" data-page="projects" aria-pressed="false"><span class="side-icon"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i></span><span>Zuletzt geöffnet</span><b id="recent-count">0</b></button>
-          <button class="side-link project-filter-link" data-filter="running" data-page="projects" aria-pressed="false"><span class="side-icon pulse-icon"></span><span>Läuft gerade</span><b id="running-filter-count">0</b></button>
+          <span class="side-nav-divider" aria-hidden="true"></span><span class="side-context-label project-filter-link">Ansichten</span>
+          <button class="side-link project-filter-link" id="view-running" data-filter="running" data-page="projects" aria-pressed="false" hidden><span class="side-icon pulse-icon"></span><span>Läuft gerade</span><b id="running-filter-count">0</b></button>
+          <button class="side-link attention-link project-filter-link" id="view-attention" data-filter="attention" data-page="projects" aria-pressed="false" hidden><span class="side-icon attention-icon"><i class="fa-solid fa-exclamation" aria-hidden="true"></i></span><span>Braucht Aufmerksamkeit</span><b id="attention-count">0</b></button>
+          <button class="side-link project-filter-link" data-filter="favorites" data-page="projects" aria-pressed="false"><span class="side-icon"><i class="fa-regular fa-star" aria-hidden="true"></i></span><span>Favoriten</span><b id="favorite-count"></b></button>
+          <button class="side-link project-filter-link" id="view-recent" data-filter="recent" data-page="projects" aria-pressed="false" hidden><span class="side-icon"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i></span><span>Zuletzt geöffnet</span><b id="recent-count">0</b></button>
         </nav>
-      </section>
-
-      <section id="category-group" class="side-group stack-group" aria-labelledby="categories-heading" hidden>
-        <div class="side-label-row"><p class="side-label" id="categories-heading">Kategorien</p><button id="clear-category" hidden>Alle</button></div>
-        <div id="category-filters" class="tech-filters"></div>
-      </section>
-
-      <section class="side-group stack-group" aria-labelledby="stacks-heading">
-        <div class="side-label-row"><p class="side-label" id="stacks-heading">Technologien</p><button id="clear-tech" hidden>Alle</button></div>
-        <div id="tech-filters" class="tech-filters"></div>
       </section>
 
       <div id="sidebar-git-repositories" class="sidebar-git-repositories" hidden></div>
 
-      <section class="side-summary" aria-label="Workspace-Zusammenfassung">
-        <div><strong id="running-count">0</strong><span>Prozesse</span></div>
-        <div><strong id="project-count">0</strong><span>Projekte</span></div>
-        <div><strong id="launcher-count">0</strong><span>Starter</span></div>
-      </section>
 
       <button id="sidebar-workspace-settings" class="sidebar-settings"><i class="fa-solid fa-folder-tree" aria-hidden="true"></i><span>Workspace verwalten</span><i class="fa-solid fa-sliders" aria-hidden="true"></i></button>
       <div class="sidebar-foot">
         <span class="secure-dot"></span>
-        <span>localhost only</span>
-        <code>7331</code>
+        <span title="DevHub ist nur von diesem Rechner aus erreichbar">Nur lokal</span>
+        <code id="local-address">127.0.0.1</code>
       </div>
     </aside>
 
@@ -116,34 +101,40 @@
 
         <nav id="mobile-view-filters" class="mobile-filter-row" aria-label="Mobile Projektfilter">
         <button data-mobile-filter="all" class="active" aria-pressed="true">Alle</button>
+        <button data-mobile-filter="running" aria-pressed="false">Läuft</button>
         <button data-mobile-filter="attention" aria-pressed="false">Aufmerksamkeit</button>
         <button data-mobile-filter="favorites" aria-pressed="false">Favoriten</button>
         <button data-mobile-filter="recent" aria-pressed="false">Zuletzt</button>
-        <button data-mobile-filter="running" aria-pressed="false">Läuft</button>
-        <select id="mobile-category" aria-label="Kategorie filtern" hidden><option value="">Kategorie</option></select>
-        <select id="mobile-tech" aria-label="Technologie filtern"><option value="">Technologie</option></select>
         </nav>
 
-        <section class="control-row" aria-label="Projektliste steuern">
-        <div id="active-filter" class="active-filter" hidden></div>
-        <span class="result-label"><b id="result-count">0</b> Projekte sichtbar</span>
-        <label class="sort-control"><span class="sr-only">Sortierung</span><select id="sort"><option value="smart">Intelligent</option><option value="modified">Zuletzt geändert</option><option value="name">Name A–Z</option><option value="opened">Zuletzt geöffnet</option></select></label>
-        <button id="group-toggle" class="group-toggle" aria-pressed="false" title="Projekte nach ihrem Kategorieordner gruppieren"><i class="fa-solid fa-layer-group" aria-hidden="true"></i><span>Gruppieren</span></button>
-        <div class="view-switch" aria-label="Darstellung">
-          <button data-view="grid" class="active" aria-label="Rasteransicht" aria-pressed="true"><i class="fa-solid fa-border-all" aria-hidden="true"></i></button>
-          <button data-view="list" aria-label="Listenansicht" aria-pressed="false"><i class="fa-solid fa-list" aria-hidden="true"></i></button>
+        <section class="control-row wb-toolbar" aria-label="Projektliste steuern">
+          <label class="wb-select"><span class="sr-only">Technologie filtern</span><select id="tech-select"><option value="">Alle Technologien</option></select></label>
+          <label class="wb-select" id="category-select-wrap" hidden><span class="sr-only">Kategorie filtern</span><select id="category-select"><option value="">Alle Kategorien</option></select></label>
+          <label class="wb-select"><span class="sr-only">Sortierung</span><select id="sort"><option value="smart">Empfohlen</option><option value="modified">Zuletzt geändert</option><option value="name">Name A–Z</option><option value="opened">Zuletzt geöffnet</option></select></label>
+          <span class="result-label" hidden><b id="result-count">0</b> von <span id="result-total">0</span> sichtbar</span>
+          <button id="reset-filters" class="wb-btn ghost" type="button" hidden>Filter zurücksetzen</button>
+          <span class="wb-spacer"></span>
+          <p id="scan-status" class="scan-status" aria-live="polite">Bereit</p>
+          <button id="group-toggle" class="group-toggle" aria-pressed="false" title="Projekte nach ihrem Kategorieordner gruppieren"><i class="fa-solid fa-layer-group" aria-hidden="true"></i><span>Gruppieren</span></button>
+          <div class="view-switch" aria-label="Darstellung">
+            <button data-view="list" aria-label="Listenansicht" title="Liste" aria-pressed="true"><i class="fa-solid fa-list" aria-hidden="true"></i></button>
+            <button data-view="grid" aria-label="Kartenansicht" title="Karten" aria-pressed="false"><i class="fa-solid fa-border-all" aria-hidden="true"></i></button>
+          </div>
+        </section>
+
+        <div id="project-split" class="wb-split">
+          <div class="wb-split-main">
+            <section id="project-grid" class="project-grid" aria-label="Projekte"></section>
+            <section id="empty-state" class="empty-state" hidden>
+              <div class="empty-glyph" aria-hidden="true"><span></span></div>
+              <h2 id="empty-title">Keine Projekte gefunden</h2>
+              <p id="empty-message">Passe Suche oder Filter an.</p>
+              <button id="empty-action" class="primary-button">Filter zurücksetzen</button>
+            </section>
+            <section id="remote-repos" class="wb-remote" aria-label="Repositories auf GitHub" hidden></section>
+          </div>
+          <aside id="project-panel" class="wb-panel" aria-label="Projektdetails" hidden></aside>
         </div>
-        </section>
-
-        <p id="scan-status" class="scan-status" aria-live="polite">Bereit</p>
-        <section id="project-grid" class="project-grid" aria-label="Projekte"></section>
-
-        <section id="empty-state" class="empty-state" hidden>
-          <div class="empty-glyph" aria-hidden="true"><span></span></div>
-          <h2 id="empty-title">Keine Projekte gefunden</h2>
-          <p id="empty-message">Passe Suche oder Filter an.</p>
-          <button id="empty-action" class="primary-button">Filter zurücksetzen</button>
-        </section>
       </div>
 
       <section id="git-page" class="git-page" aria-label="Git-Zentrale" hidden></section>
@@ -185,26 +176,7 @@
     <div class="log-foot"><span><i class="live-indicator"></i><span id="log-state">gestoppt</span></span><button id="clear-log" class="text-button">Ansicht leeren</button></div>
   </dialog>
 
-  <dialog id="git-discard-dialog" class="git-discard-dialog" aria-labelledby="git-discard-title" aria-describedby="git-discard-description">
-    <div class="git-discard-head">
-      <span aria-hidden="true"><i class="fa-solid fa-rotate-left"></i></span>
-      <div><p class="eyebrow">Lokale Änderungen</p><h2 id="git-discard-title">Änderungen verwerfen?</h2></div>
-    </div>
-    <div class="git-discard-body">
-      <p id="git-discard-description">Die ausgewählten Dateien werden auf ihren letzten Commit-Stand zurückgesetzt. Neue Dateien werden in den Papierkorb verschoben.</p>
-      <strong id="git-discard-count">0 Dateien ausgewählt</strong>
-      <div id="git-discard-files" class="git-discard-files" aria-label="Dateien, deren Änderungen verworfen werden"></div>
-      <p class="git-discard-warning"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><span id="git-discard-warning-text">Das Zurücksetzen geänderter Dateien lässt sich nicht rückgängig machen. Neue Dateien kannst du aus dem Papierkorb wiederherstellen.</span></p>
-    </div>
-    <footer class="git-discard-foot">
-      <button id="git-discard-cancel" type="button" class="secondary-button">Abbrechen</button>
-      <button id="git-discard-confirm" type="button" class="danger-button">Änderungen verwerfen</button>
-    </footer>
-  </dialog>
 
-  <dialog id="project-dialog" class="project-dialog" aria-labelledby="project-dialog-title">
-    <div id="project-dialog-content"></div>
-  </dialog>
 
   <dialog id="palette" class="wb-palette" aria-label="Befehlspalette">
     <div class="wb-palette-q">
