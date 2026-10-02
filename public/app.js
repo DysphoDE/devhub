@@ -372,15 +372,14 @@ function projectBits(project) {
   const live = project.isSelf ? `<span class="wb-live">diese Instanz · ${escapeHtml(location.host)}</span>`
     : launcher ? `<span class="wb-live">${escapeHtml(launcher.name)}${launcher.runtime.url ? ` · ${escapeHtml(displayUrl(launcher.runtime.url))}` : ` · ${statusLabels[launcher.runtime.status]}`}</span>`
     : failed ? `<span class="wb-live error">${escapeHtml(failed.name)} · abgebrochen</span>` : "";
-  const tech = project.technologies.slice(0, 3);
-  const more = project.technologies.length - tech.length;
-  const techs = `<span class="wb-techs">${tech.map((technology) => `<span class="wb-tech">${escapeHtml(technology)}</span>`).join("")}${more > 0 ? `<span class="wb-tech" title="${escapeHtml(project.technologies.slice(3).join(", "))}">+${more}</span>` : ""}</span>`;
   const git = project.git ? gitStatusPresentation(project.git) : null;
   const gitHtml = `<span class="wb-git">${git ? `<i class="fa-solid fa-code-branch" aria-hidden="true"></i><code>${escapeHtml(project.git.branch || "detached")}</code><span class="wb-git-state ${git.kind}" title="${escapeHtml(git.title)}">${escapeHtml(git.label)}</span>` : '<span class="wb-quiet">kein Git</span>'}</span>`;
+  const last = project.git?.lastCommit;
+  const commit = last ? `<span class="wb-commit-line" title="${escapeHtml(last.subject)} · ${escapeHtml(last.hash)} · ${escapeHtml(shortAgo(last.date))}">${escapeHtml(last.subject)}</span>` : "";
   const when = `<span class="wb-when" title="${escapeHtml(dateTime(project.modifiedAt))}">${shortAgo(project.modifiedAt)}</span>`;
   const favorite = state.favorites.has(project.id) ? ' <i class="fa-solid fa-star wb-fav" aria-label="Favorit"></i>' : "";
   const sub = `${domainLink(project)}<span>${escapeHtml(project.relativePath)}</span>${live}`;
-  return { status, statusTitle, techs, gitHtml, when, favorite, sub, action: rowAction(project) };
+  return { status, statusTitle, gitHtml, commit, when, favorite, sub, action: rowAction(project) };
 }
 
 // Die Auswahl setzt renderPanel nachträglich, damit Zeilen und Kacheln beim Wechseln nicht neu entstehen und den Fokus behalten.
@@ -389,7 +388,7 @@ function projectRow(project) {
   return `<article class="wb-row ${bits.status}" data-project="${project.id}" tabindex="0" role="button" aria-pressed="false" aria-label="${escapeHtml(project.name)}">
     <span class="wb-status ${bits.status}" title="${bits.statusTitle}"></span>
     <span class="wb-row-name"><strong>${escapeHtml(project.name)}${bits.favorite}</strong><small>${bits.sub}</small></span>
-    ${bits.techs}${bits.gitHtml}${bits.when}
+    <span class="wb-git-cell">${bits.gitHtml}${bits.commit}</span>${bits.when}
     <span class="wb-row-act">${bits.action}</span>
   </article>`;
 }
@@ -404,7 +403,6 @@ function projectTile(project) {
     <header class="wb-tile-head">${mark}<span class="wb-status ${bits.status}" title="${bits.statusTitle}"></span></header>
     <h3 class="wb-tile-name">${escapeHtml(project.name)}${bits.favorite}</h3>
     <p class="wb-tile-sub">${bits.sub}</p>
-    ${bits.techs}
     <footer class="wb-tile-foot"><div class="wb-tile-meta">${bits.gitHtml}${bits.when}</div><div class="wb-tile-act">${bits.action}</div></footer>
   </article>`;
 }
@@ -513,7 +511,7 @@ function projectPanelHtml(project) {
     <button type="button" data-project-action="folder" data-project-id="${project.id}"><i class="fa-regular fa-folder-open" aria-hidden="true"></i>Ordner</button>
     <button type="button" data-copy-path="${project.id}"><i class="fa-regular fa-copy" aria-hidden="true"></i>Pfad</button>
   </div>`));
-  blocks.push(panelBlock("Technik", `<div class="wb-techs all">${project.technologies.map((technology) => `<span class="wb-tech">${escapeHtml(technology)}</span>`).join("")}</div><p class="wb-facts">${project.fileCount.toLocaleString("de-DE")} Dateien · zuletzt geändert ${escapeHtml(dateTime(project.modifiedAt))}</p>`));
+  blocks.push(`<p class="wb-facts"><span>${escapeHtml(project.technologies.join(" · "))}</span><span>${project.fileCount.toLocaleString("de-DE")} Dateien · zuletzt geändert ${escapeHtml(dateTime(project.modifiedAt))}</span></p>`);
   return `<header class="wb-panel-head">
       <div><h2>${escapeHtml(project.name)}</h2><code>${escapeHtml(projectPath(project))}</code></div>
       <button type="button" class="wb-btn icon ghost ${favorite ? "on" : ""}" data-favorite="${project.id}" aria-pressed="${favorite}" aria-label="${favorite ? "Aus Favoriten entfernen" : "Zu Favoriten hinzufügen"}" title="${favorite ? "Aus Favoriten entfernen" : "Zu Favoriten hinzufügen"}">${favoriteIcon(favorite)}</button>
@@ -805,7 +803,7 @@ function groupHeading(group) {
 function gridEntries(projects) {
   const list = state.view === "list";
   const renderer = list ? projectRow : projectTile;
-  const head = list && projects.length ? [{ key: "head", html: '<div class="wb-row-head" aria-hidden="true"><span></span><span>Projekt</span><span>Technik</span><span>Git</span><span>Geändert</span><span>Aktion</span></div>' }] : [];
+  const head = list && projects.length ? [{ key: "head", html: '<div class="wb-row-head" aria-hidden="true"><span></span><span>Projekt</span><span>Git · letzter Commit</span><span>Geändert</span><span>Aktion</span></div>' }] : [];
   if (state.group !== "category") return [...head, ...projects.map((project) => ({ key: `project:${project.id}`, html: renderer(project) }))];
   const entries = [...head];
   for (const group of projectGroups(projects)) {

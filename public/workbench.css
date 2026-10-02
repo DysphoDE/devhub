@@ -135,12 +135,12 @@
 .wb-split-main > .project-grid, .wb-split-main > .empty-state { width: 100%; margin-inline: 0; }
 
 .project-grid.wb-rows { display: flex; flex-direction: column; gap: 4px; }
-.wb-row-head, .wb-row { display: grid; grid-template-columns: 14px minmax(0, 1fr) minmax(0, 150px) minmax(0, 140px) 84px 128px; align-items: center; gap: 14px; padding: 0 14px; }
-/* Wird die Liste schmal, weicht zuerst die Technik-Spalte, sie steht auch im Detailbereich. */
-@container wb-list (max-width: 900px) {
-  .wb-row-head, .wb-row { grid-template-columns: 14px minmax(0, 1fr) minmax(0, 140px) 84px 128px; }
-  .wb-row-head > span:nth-child(3), .wb-row > .wb-techs { display: none; }
-}
+.wb-row-head, .wb-row { display: grid; grid-template-columns: 14px minmax(0, 1.25fr) minmax(0, 1fr) 84px 128px; align-items: center; gap: 14px; padding: 0 14px; }
+/* Git-Spalte: Branch und Zustand, darunter die letzte Commit-Nachricht als Hinweis, woran zuletzt gearbeitet wurde. */
+.wb-git-cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.wb-commit-line { color: var(--muted); font-size: var(--type-micro); line-height: 1.4; overflow-wrap: anywhere; }
+body.wb-compact .wb-commit-line { display: none; }
+@container wb-list (max-width: 560px) { .wb-commit-line { display: none; } }
 .wb-row-head { padding-bottom: 4px; color: var(--quiet); font: 600 var(--type-micro)/1.4 var(--font-ui); letter-spacing: .07em; text-transform: uppercase; }
 .wb-row-head span:last-child { text-align: right; }
 .wb-row { min-height: 60px; padding-block: 11px; border: 1px solid var(--line); border-radius: var(--wb-radius); background: var(--surface); cursor: pointer; transition: border-color .12s ease; }
@@ -160,8 +160,6 @@
 .wb-status.self { border: 0; background: var(--signal); }
 @keyframes wb-pulse { 50% { box-shadow: 0 0 0 7px transparent; } }
 @media (prefers-reduced-motion: reduce) { .wb-status.run { animation: none; } }
-.wb-techs { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
-.wb-tech { padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--wb-surface-2); color: var(--muted); font: 500 var(--type-micro)/1.2 var(--font-ui); white-space: nowrap; }
 .wb-git { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; color: var(--muted); font-size: var(--type-micro); }
 .wb-git code { min-width: 0; overflow: hidden; color: var(--muted); font: var(--type-micro)/1.3 var(--mono); text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .wb-git-state { padding: 2px 7px; border-radius: 99px; background: var(--wb-surface-2); color: var(--muted); font: 600 var(--type-micro)/1.4 var(--font-ui); white-space: nowrap; }
@@ -189,7 +187,7 @@ body.wb-compact .wb-row-name small:not(:has(.wb-live, .wb-domain)) { display: no
 .wb-panel-desc { margin: -6px 0 0; color: var(--muted); font-size: var(--type-body); line-height: 1.5; }
 .wb-panel-block { display: flex; flex-direction: column; gap: 8px; }
 .wb-hint { margin: 0; color: var(--muted); font-size: var(--type-caption); line-height: 1.5; }
-.wb-facts { margin: 4px 0 0; color: var(--quiet); font-size: var(--type-micro); }
+.wb-facts { display: flex; flex-direction: column; gap: 3px; margin: 0; padding-top: 14px; border-top: 1px solid var(--line); color: var(--quiet); font-size: var(--type-micro); line-height: 1.5; }
 .wb-runbox { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid color-mix(in srgb, var(--runtime) 40%, var(--line)); border-radius: 10px; background: var(--runtime-soft); }
 .wb-runbox.error { border-color: var(--wb-danger-line); background: var(--wb-danger-soft); }
 .wb-runbox.starting, .wb-runbox.stopping { border-color: var(--wb-warning-line); background: var(--wb-warning-soft); }
@@ -246,8 +244,8 @@ body.wb-compact .wb-row-name small:not(:has(.wb-live, .wb-domain)) { display: no
   .wb-row > .wb-status { grid-area: status; align-self: start; margin-top: 5px; }
   .wb-row > .wb-row-name { grid-area: name; }
   .wb-row > .wb-row-act { grid-area: act; }
-  .wb-row > .wb-git { grid-area: meta; }
-  .wb-row > .wb-techs, .wb-row > .wb-when { display: none; }
+  .wb-row > .wb-git-cell { grid-area: meta; }
+  .wb-row > .wb-when { display: none; }
 }
 @media (max-width: 860px) {
   .workspace-header-actions { display: flex; flex-wrap: wrap; }
@@ -319,7 +317,6 @@ html[data-theme="dark"] .wb-palette::backdrop { background: rgba(0, 0, 0, .55); 
 a.wb-domain:hover { text-decoration: underline; text-underline-offset: 2px; }
 .wb-domain.off { color: var(--quiet); }
 .wb-domain.off::after { content: "aus"; margin-left: 2px; padding: 0 5px; border-radius: 4px; background: var(--wb-warning-soft); color: var(--wb-warning-ink); font: 600 10px/1.6 var(--font-ui); }
-.wb-row-name small .wb-domain + span::before { content: "·"; margin-right: 10px; color: var(--quiet); }
 .project-card .card-domain { display: flex; margin-top: 6px; font-size: var(--type-caption); }
 .wb-addr-row { display: flex; align-items: center; gap: 6px; }
 .wb-addr-open { flex: 1; min-width: 0; min-height: 38px; justify-content: flex-start; padding: 0 12px; font: 600 var(--type-body)/1.3 var(--mono); }
@@ -328,7 +325,6 @@ a.wb-domain:hover { text-decoration: underline; text-underline-offset: 2px; }
 .wb-addr-open.off { display: inline-flex; align-items: center; gap: 7px; border: 1px dashed var(--line-strong); border-radius: 7px; background: var(--wb-surface-2); color: var(--muted); font-weight: 500; }
 .wb-addr-warn { color: var(--wb-warning-ink); }
 body.wb-compact .wb-row-name small:has(.wb-domain) { display: flex; }
-body.wb-compact .wb-row-name small .wb-domain + span::before { content: none; }
 
 /* Kachelansicht: dieselben Bausteine wie die Zeile, Details stehen im Detailbereich */
 .project-grid.wb-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; align-items: stretch; }
@@ -351,6 +347,5 @@ body.wb-compact .wb-row-name small .wb-domain + span::before { content: none; }
 .wb-tile-act > .wb-btn:first-child { flex: 1; }
 .wb-tile-act > .wb-quiet { padding: 7px 0; }
 body.wb-compact .wb-tile { min-height: 0; gap: 8px; padding: 12px 14px; }
-body.wb-compact .wb-tile > .wb-techs { display: none; }
 body.wb-compact .wb-tile-mark { width: 30px; height: 30px; flex-basis: 30px; border-radius: 8px; font-size: 12px; }
 body.wb-compact .wb-tile-sub > span:not(.wb-live):not(.wb-domain) { display: none; }
