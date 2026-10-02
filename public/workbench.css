@@ -1,0 +1,7 @@
+/* Workbench: der überarbeitete Projektbereich (Liste mit Detailbereich, Dienste-Anzeige, Befehlspalette).
+   Wird als letztes Stylesheet geladen und überschreibt gezielt ältere Regeln aus styles.css und design-system.css. */
+
+/* Sofortkorrekturen: nichts wird mehr abgeschnitten. */
+.project-grid .project-card h2 { white-space: normal; overflow: visible; text-overflow: clip; text-wrap: balance; overflow-wrap: anywhere; line-height: 1.18; }
+.project-grid .primary-card-action { overflow: visible; white-space: nowrap; }
+.gw-header .gw-seg-copy strong { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; line-height: 1.3; }

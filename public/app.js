@@ -75,6 +75,9 @@ const elements = {
   toastRegion: document.querySelector("#toast-region")
 };
 
+const isMac = /mac|iphone|ipad/i.test(navigator.userAgentData?.platform || navigator.platform || navigator.userAgent);
+document.querySelector("#search-shortcut").textContent = isMac ? "⌘K" : "Strg K";
+
 const statusLabels = { stopped: "bereit", starting: "startet", running: "läuft", stopping: "stoppt", error: "Fehler" };
 const techPresentation = {
   "Laravel": ["L", "tech-laravel"], "WordPress": ["W", "tech-wordpress"], "Symfony": ["S", "tech-symfony"],
@@ -129,7 +132,7 @@ function projectState(project) {
   if (launcher) return { kind: "running", label: `läuft${runtimePort(launcher) ? ` · ${runtimePort(launcher)}` : ""}` };
   if (attention[0]) return { kind: attention[0].kind, label: attention[0].label };
   if (!project.launchers.length) return { kind: "folder", label: "kein Starter" };
-  return { kind: "ready", label: relativeTime(project.modifiedAt).replace(" geändert", "") };
+  return { kind: "ready", label: "bereit" };
 }
 
 function findLauncher(id) {
@@ -253,8 +256,9 @@ function primaryAction(project, compact = false) {
   if (launcher) {
     const running = launcher.runtime.status === "running";
     const busy = ["starting", "stopping"].includes(launcher.runtime.status);
-    const label = busy ? (compact ? "Bitte warten …" : "Wird ausgeführt …") : running ? "Stoppen" : compact ? "Starten" : `Starten · ${escapeHtml(launcher.name)}`;
-    return `<button class="primary-card-action ${running ? "running" : ""}" data-launcher-action="${running ? "stop" : "start"}" data-id="${launcher.id}" data-project-id="${project.id}" ${busy ? "disabled" : ""}><i class="fa-solid ${busy ? "fa-spinner fa-spin" : running ? "fa-stop" : "fa-play"}" aria-hidden="true"></i>${label}</button>`;
+    const label = busy ? "Bitte warten …" : running ? "Stoppen" : "Starten";
+    const title = `${escapeHtml(launcher.name)} ${running ? "stoppen" : "starten"} · ${escapeHtml(launcher.command)}`;
+    return `<button class="primary-card-action ${running ? "running" : ""}" data-launcher-action="${running ? "stop" : "start"}" data-id="${launcher.id}" data-project-id="${project.id}" title="${title}" ${busy ? "disabled" : ""}><i class="fa-solid ${busy ? "fa-spinner fa-spin" : running ? "fa-stop" : "fa-play"}" aria-hidden="true"></i>${label}</button>`;
   }
   return `<button class="primary-card-action folder" data-project-action="folder" data-project-id="${project.id}"><i class="fa-regular fa-folder-open" aria-hidden="true"></i>${compact ? "Ordner" : "Ordner öffnen"}</button>`;
 }
@@ -1176,6 +1180,7 @@ function render(preserveFocus = true) {
   }
   const projects = getVisibleProjects();
   elements.resultCount.textContent = projects.length;
+  elements.resultCount.closest(".result-label").hidden = projects.length === state.projects.length;
   elements.grid.classList.toggle("list-view", state.view === "list");
   elements.grid.classList.toggle("grouped", state.group === "category");
   elements.groupToggle.classList.toggle("active", state.group === "category");
@@ -1262,7 +1267,7 @@ async function rescan() {
     state.gitSuggestionLoading.clear();
     render(false);
     loadActiveGitSurface(true);
-    elements.scanStatus.textContent = `${state.projects.length} Projekte · gerade aktualisiert`;
+    elements.scanStatus.textContent = "Gerade aktualisiert";
     toast(`${state.projects.length} Projekte neu eingelesen.`);
   } catch (error) { elements.scanStatus.textContent = "Einlesen fehlgeschlagen"; toast(error.message, "error"); }
   finally { elements.rescan.classList.remove("loading"); elements.rescan.disabled = false; elements.rescan.removeAttribute("aria-busy"); }
@@ -1318,7 +1323,7 @@ async function saveWorkspace(event) {
     elements.workspaceDialog.close();
     render(false);
     loadActiveGitSurface();
-    elements.scanStatus.textContent = `${state.projects.length} Projekte · Workspace aktualisiert`;
+    elements.scanStatus.textContent = "Workspace aktualisiert";
     toast(`Workspace gewechselt: ${data.root}`);
   } catch (error) {
     toast(error.message, "error");
@@ -1493,10 +1498,10 @@ function connectEvents() {
     state.projects = JSON.parse(event.data).projects;
     render();
     loadActiveGitSurface(true);
-    elements.scanStatus.textContent = `${state.projects.length} Projekte · automatisch aktualisiert`;
+    elements.scanStatus.textContent = "Automatisch aktualisiert";
   });
   events.addEventListener("workspace", (event) => { const data = JSON.parse(event.data); setWorkspaceRoot(data.root); state.projects = data.projects; render(false); });
-  events.onopen = () => { elements.scanStatus.textContent = `${state.projects.length} Projekte · live verbunden`; };
+  events.onopen = () => { elements.scanStatus.textContent = "Live verbunden"; };
   events.onerror = () => { elements.scanStatus.textContent = "Live-Verbindung wird wiederhergestellt …"; };
 }
 
