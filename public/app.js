@@ -61,6 +61,37 @@ document.querySelector("#palette-browser-key").textContent = isMac ? "⌥" : "Al
 
 document.querySelector("#local-address").textContent = location.host;
 
+// Darstellung: System, Hell oder Dunkel. Das Thema selbst setzt theme.js vor dem ersten Zeichnen.
+const themeLabels = { system: ["circle-half-stroke", "Darstellung: wie das System"], light: ["sun", "Darstellung: hell"], dark: ["moon", "Darstellung: dunkel"] };
+function renderThemeToggle() {
+  const choice = window.devhubTheme?.get() || "system";
+  const [icon, label] = themeLabels[choice] || themeLabels.system;
+  const button = document.querySelector("#theme-toggle");
+  button.innerHTML = `<i class="fa-solid fa-${icon}" aria-hidden="true"></i>`;
+  button.title = `${label} · klicken zum Wechseln`;
+  button.setAttribute("aria-label", `${label}. Klicken zum Wechseln.`);
+}
+function setTheme(choice) { window.devhubTheme?.set(choice); renderThemeToggle(); }
+document.querySelector("#theme-toggle").addEventListener("click", () => {
+  const order = ["system", "light", "dark"];
+  setTheme(order[(order.indexOf(window.devhubTheme?.get() || "system") + 1) % order.length]);
+});
+renderThemeToggle();
+
+// Dichte der Liste
+function applyDensity(compact) {
+  document.body.classList.toggle("wb-compact", compact);
+  const button = document.querySelector("#density-toggle");
+  button.setAttribute("aria-pressed", String(compact));
+  button.classList.toggle("active", compact);
+}
+applyDensity(localStorage.getItem("devhub_density") === "compact");
+document.querySelector("#density-toggle").addEventListener("click", () => {
+  const compact = !document.body.classList.contains("wb-compact");
+  localStorage.setItem("devhub_density", compact ? "compact" : "comfortable");
+  applyDensity(compact);
+});
+
 const statusLabels = { stopped: "bereit", starting: "startet", running: "läuft", stopping: "stoppt", error: "Fehler" };
 const techPresentation = {
   "Laravel": ["L", "tech-laravel"], "WordPress": ["W", "tech-wordpress"], "Symfony": ["S", "tech-symfony"],
@@ -1297,6 +1328,11 @@ function paletteItems() {
   command("rotate", "Workspace neu einlesen", state.root, rescan, "scan aktualisieren");
   command("folder-tree", "Workspace wechseln …", state.root, openWorkspaceSettings, "ordner");
   command("plus", "Repository klonen oder anlegen …", "", () => { setWorkspacePage("git"); gitWorkspace.openAddRepository(); }, "github git clone");
+  const theme = window.devhubTheme?.get() || "system";
+  for (const [choice, label] of [["light", "Helle Darstellung"], ["dark", "Dunkle Darstellung"], ["system", "Darstellung wie das System"]]) {
+    if (choice !== theme) command(themeLabels[choice][0], label, "", () => setTheme(choice), "theme thema farbe hell dunkel modus");
+  }
+  command("bars", document.body.classList.contains("wb-compact") ? "Liste mit normalem Abstand" : "Liste kompakt", "", () => document.querySelector("#density-toggle").click(), "dichte zeilen abstand");
   if (state.github?.available) {
     for (const repo of state.github.repositories.filter((item) => !gitWorkspace.isInWorkspace(item)).slice(0, 60)) {
       items.push({ group: "Von GitHub klonen", icon: "cloud-arrow-down", label: `${repo.name} klonen`, hint: repo.isPrivate ? "privat" : "öffentlich", keywords: `${repo.nameWithOwner} ${repo.description || ""} github`, run: () => { setWorkspacePage("git"); gitWorkspace.openGithubClone(repo.nameWithOwner, repo.name); } });

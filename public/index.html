@@ -3,9 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#17202c">
   <title>DevHub Workbench</title>
+  <script src="/theme.js"></script>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/vendor/fontawesome/css/fontawesome.min.css">
   <link rel="stylesheet" href="/vendor/fontawesome/css/solid.min.css">
@@ -14,6 +15,7 @@
   <link rel="stylesheet" href="/git-workspace.css">
   <link rel="stylesheet" href="/design-system.css">
   <link rel="stylesheet" href="/workbench.css">
+  <link rel="stylesheet" href="/theme-dark.css">
 </head>
 <body>
   <div class="app-shell">
@@ -48,9 +50,9 @@
 
       <button id="sidebar-workspace-settings" class="sidebar-settings"><i class="fa-solid fa-folder-tree" aria-hidden="true"></i><span>Workspace verwalten</span><i class="fa-solid fa-sliders" aria-hidden="true"></i></button>
       <div class="sidebar-foot">
-        <span class="secure-dot"></span>
-        <span title="DevHub ist nur von diesem Rechner aus erreichbar">Nur lokal</span>
-        <code id="local-address">127.0.0.1</code>
+        <span class="secure-dot" title="DevHub ist nur von diesem Rechner aus erreichbar"></span>
+        <code id="local-address" title="DevHub ist nur von diesem Rechner aus erreichbar">127.0.0.1</code>
+        <button id="theme-toggle" class="wb-theme-toggle" type="button" aria-label="Darstellung wechseln"><i class="fa-solid fa-circle-half-stroke" aria-hidden="true"></i></button>
       </div>
     </aside>
 
@@ -115,6 +117,7 @@
           <button id="reset-filters" class="wb-btn ghost" type="button" hidden>Filter zurücksetzen</button>
           <span class="wb-spacer"></span>
           <p id="scan-status" class="scan-status" aria-live="polite">Bereit</p>
+          <button id="density-toggle" class="group-toggle" type="button" aria-pressed="false" title="Zeilen enger setzen"><i class="fa-solid fa-bars" aria-hidden="true"></i><span>Kompakt</span></button>
           <button id="group-toggle" class="group-toggle" aria-pressed="false" title="Projekte nach ihrem Kategorieordner gruppieren"><i class="fa-solid fa-layer-group" aria-hidden="true"></i><span>Gruppieren</span></button>
           <div class="view-switch" aria-label="Darstellung">
             <button data-view="list" aria-label="Listenansicht" title="Liste" aria-pressed="true"><i class="fa-solid fa-list" aria-hidden="true"></i></button>

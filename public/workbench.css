@@ -18,6 +18,9 @@
   --wb-runtime-ink: #157a6a;
   --wb-on-signal: #ffffff;
   --wb-radius: 9px;
+  /* Dunkle Flächen, die im hellen Thema den Schrift-Token --ink nutzen. Im dunklen Thema bleiben sie dunkel. */
+  --surface-ink: #17202c;
+  --surface-ink-2: #243142;
   --wb-shadow-pop: 0 1px 2px rgba(23, 32, 44, .06), 0 16px 40px rgba(23, 32, 44, .14);
 }
 
@@ -112,7 +115,7 @@
 .git-page-active .sidebar .sidebar-settings { margin-top: 10px; }
 .sidebar .side-context-label { padding-top: 2px; color: #8fa0ba; font: 600 var(--type-micro)/1.4 var(--font-ui); letter-spacing: .08em; text-transform: uppercase; }
 .sidebar-foot { align-items: center; }
-.sidebar-foot code { min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-foot code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Werkzeugleiste über der Liste */
 .wb-toolbar { flex-wrap: wrap; gap: 8px; min-height: 0; margin: 0 0 12px; padding: 0; }
@@ -168,10 +171,12 @@
 .wb-quiet { color: var(--quiet); font-size: var(--type-caption); }
 .project-grid.wb-rows .group-heading { margin: 14px 0 4px; }
 
-body.wb-compact .wb-row { min-height: 44px; padding-block: 6px; }
+/* Kompakt: enger gesetzte Zeilen, der Ordnerpfad entfällt, laufende Adressen bleiben. */
+body.wb-compact .wb-row { min-height: 42px; padding-block: 5px; }
 body.wb-compact .project-grid.wb-rows { gap: 2px; }
-body.wb-compact .wb-row-name small .wb-live ~ span, body.wb-compact .wb-row-name small > span:first-child { display: none; }
-body.wb-compact .wb-row-name small:has(.wb-live) > span:first-child { display: none; }
+body.wb-compact .wb-row-name small > span:not(.wb-live) { display: none; }
+body.wb-compact .wb-row-name small:not(:has(.wb-live)) { display: none; }
+.wb-toolbar .group-toggle.active { color: var(--signal); background: var(--signal-soft); border-color: color-mix(in srgb, var(--signal) 35%, var(--line)); }
 
 /* Detailbereich */
 .wb-panel { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; display: flex; flex-direction: column; gap: 18px; padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
@@ -252,3 +257,51 @@ body.wb-compact .wb-row-name small:has(.wb-live) > span:first-child { display: n
   .workspace-header-actions .global-search { flex: 1 1 200px; width: auto; }
 }
 .sidebar .side-link b:empty { display: none; }
+
+/* Darstellungsschalter im Fuß der Seitenleiste */
+.wb-theme-toggle { width: 30px; height: 30px; flex: 0 0 30px; display: grid; place-items: center; margin-left: auto; padding: 0; border: 1px solid #ffffff14; border-radius: 7px; background: transparent; color: #8fa0ba; cursor: pointer; }
+.wb-theme-toggle:hover { background: #ffffff0d; color: #dbe4f2; }
+.wb-theme-toggle:focus-visible { outline: 2px solid #8fa8ff; outline-offset: 2px; }
+
+/* Dunkles Thema: die Tokens von Hand, alle übrigen Farben leitet /theme-dark.css aus den hellen Stylesheets ab. */
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #e9eef6;
+  --ink-2: #cdd7e4;
+  --canvas: #0e141d;
+  --surface: #161e2a;
+  --surface-soft: #1b2432;
+  --line: #273345;
+  --line-strong: #364559;
+  --text: #d3dce8;
+  --muted: #9aa8bb;
+  --quiet: #7b899c;
+  --signal: #5a7bff;
+  --signal-soft: #1c2950;
+  --runtime: #45cdb6;
+  --runtime-soft: #12322e;
+  --warning: #e2a23e;
+  --danger: #f08080;
+  --shadow: 0 15px 40px rgba(0, 0, 0, .42);
+  --gw-accent: #ee8650;
+  --gw-accent-dark: #f4a274;
+  --gw-accent-soft: #3a2418;
+  --gw-head: #121a28;
+  --gw-head-ink: #e8edf5;
+  --gw-head-muted: #8d9db6;
+  --wb-surface-2: #1b2432;
+  --wb-warning-ink: #ebb459;
+  --wb-warning-soft: #31270f;
+  --wb-warning-line: #574320;
+  --wb-danger-ink: #f2a0a0;
+  --wb-danger-soft: #361b1e;
+  --wb-danger-line: #5c2b2f;
+  --wb-runtime-ink: #6fdcc8;
+  --wb-on-signal: #ffffff;
+  --wb-shadow-pop: 0 1px 2px rgba(0, 0, 0, .45), 0 18px 44px rgba(0, 0, 0, .5);
+  --surface-ink: #1d2737;
+  --surface-ink-2: #283548;
+}
+html[data-theme="dark"] body { background: var(--canvas); color: var(--text); }
+html[data-theme="dark"] .sidebar, html[data-theme="dark"] .git-page-active .sidebar { background: #0b111a; }
+html[data-theme="dark"] .wb-palette::backdrop { background: rgba(0, 0, 0, .55); }

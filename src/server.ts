@@ -9,6 +9,7 @@ import { advancedGitActions, readGitWorkspace, readGitStash, readGitStats, readG
 import { ProcessManager } from "./process-manager.js";
 import { readGitInfo, scanWorkspace } from "./scanner.js";
 import { isStackAction } from "./stack.js";
+import { darkThemeStylesheet } from "./theme.js";
 import { resolveStack } from "./stack-registry.js";
 import { chooseWorkspaceDirectory, getSystemCapabilities, runProjectAction } from "./system-actions.js";
 import type { ProjectDefinition, PublicProject } from "./types.js";
@@ -546,6 +547,15 @@ const server = createServer(async (request, response) => {
 
     if (pathname.startsWith("/api/")) {
       sendJson(response, 404, { error: "API-Endpunkt nicht gefunden." });
+      return;
+    }
+    if (request.method === "GET" && pathname === "/theme-dark.css") {
+      response.writeHead(200, {
+        "Content-Type": "text/css; charset=utf-8",
+        "Cache-Control": "no-cache",
+        "X-Content-Type-Options": "nosniff"
+      });
+      response.end(await darkThemeStylesheet(publicDirectory));
       return;
     }
     serveStatic(pathname, response);
