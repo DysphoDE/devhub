@@ -34,6 +34,18 @@ export interface LauncherDefinition {
   args: string[];
   dynamicPort: boolean;
   preferred: boolean;
+  /** Port, den der Befehl selbst festlegt (etwa `php -S 127.0.0.1:8787` oder `vite --port 5174`). */
+  port: number | null;
+  /** Starter, der dieses Skript bereits mitstartet, etwa ein `dev`, das per concurrently mehrere Teile startet. */
+  parentId: string | null;
+  /** Teilskripte, die dieser Starter gemeinsam startet. Leer bei einfachen Startern. */
+  parts: LauncherPart[];
+}
+
+export interface LauncherPart {
+  script: string;
+  launcherId: string | null;
+  port: number | null;
 }
 
 export interface GitInfo {
@@ -82,6 +94,10 @@ export interface ProjectDefinition {
   git: GitInfo | null;
   fileCount: number;
   launchers: LauncherDefinition[];
+  /** true für die DevHub-Installation, die gerade läuft. Sie bietet sich nicht selbst zum Starten an. */
+  isSelf: boolean;
+  /** true, wenn die Beschreibung nur aus erkannten Technologien abgeleitet ist. */
+  descriptionAuto: boolean;
 }
 
 export interface LogEntry {

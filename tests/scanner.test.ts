@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { scanWorkspace } from "../src/scanner.js";
+import { composedScripts, portFromCommand, scanWorkspace } from "../src/scanner.js";
 import type { AppConfig } from "../src/types.js";
 
 function testConfig(root: string): AppConfig {
@@ -40,6 +40,7 @@ test("findet Package-Scripts und Startdateien der eigenen Plattform rekursiv", a
     assert.equal(projects.length, 1);
     assert.equal(projects[0].name, "Kundenportal Next");
     assert.equal(projects[0].description, "Testprojekt");
+    assert.equal(projects[0].descriptionAuto, false);
     assert.deepEqual(projects[0].launchers.map((launcher) => launcher.command), [
       "pnpm run dev",
       "pnpm run dev:mock",
@@ -81,6 +82,8 @@ test("listet DevHub selbst ohne konkurrierende Startaktionen", async () => {
     const projects = await scanWorkspace(testConfig(root), appPath);
     assert.deepEqual(projects.map((project) => project.relativePath), ["DevHub", "Kundenportal"]);
     assert.deepEqual(projects.find((project) => project.relativePath === "DevHub")?.launchers, []);
+    assert.equal(projects.find((project) => project.relativePath === "DevHub")?.isSelf, true);
+    assert.equal(projects.find((project) => project.relativePath === "Kundenportal")?.isSelf, false);
     assert.equal(projects.find((project) => project.relativePath === "Kundenportal")?.launchers.length, 1);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -292,6 +295,60 @@ test("ignoriert Virtual Hosts, deren DocumentRoot nichts ausliefern kann", async
     await rm(path.join(root, "projects", "ante-up", "src"), { recursive: true, force: true });
     const rescanned = await scanWorkspace({ ...testConfig(root), categoryDepth: 3, stack: "laragon", laragonRoot }, path.join(root, "devhub"));
     assert.equal(rescanned.find((project) => project.relativePath === "projects/ante-up")?.defaultUrl, "http://ante-up.test/");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("liest feste Ports aus Startbefehlen", () => {
+  assert.equal(portFromCommand("php -S 127.0.0.1:8787 -t ../public ../public/dev-router.php"), 8787);
+  assert.equal(portFromCommand("vite --port 5174"), 5174);
+  assert.equal(portFromCommand("vite --port=4000 --host"), 4000);
+  assert.equal(portFromCommand("next dev -p 3001"), 3001);
+  assert.equal(portFromCommand("PORT=8080 node server.js"), 8080);
+  assert.equal(portFromCommand("vite"), null);
+  assert.equal(portFromCommand("vite --host 127.0.0.1"), null);
+});
+
+test("erkennt Teilskripte von concurrently, npm-run-all und run-p", () => {
+  const available = ["dev", "dev:php", "dev:php2", "dev:worker", "dev:vite", "build", "watch:css", "watch:js"];
+  assert.deepEqual(composedScripts('concurrently --kill-others --names php,vite "npm:dev:php" "npm:dev:vite"', available, "dev"), ["dev:php", "dev:vite"]);
+  assert.deepEqual(composedScripts('concurrently "npm:dev:*"', available, "dev"), ["dev:php", "dev:php2", "dev:worker", "dev:vite"]);
+  assert.deepEqual(composedScripts('concurrently "npm run watch:css" "pnpm watch:js"', available, "dev"), ["watch:css", "watch:js"]);
+  assert.deepEqual(composedScripts("run-p watch:*", available, "dev"), ["watch:css", "watch:js"]);
+  assert.deepEqual(composedScripts("npm-run-all --parallel dev:php dev:vite", available, "dev"), ["dev:php", "dev:vite"]);
+  assert.deepEqual(composedScripts("vite", available, "dev"), []);
+  assert.deepEqual(composedScripts("npm run build && vite", available, "dev"), [], "ohne Sammelwerkzeug ist es kein Sammelskript");
+});
+
+test("ordnet die Teile eines Sammelskripts dem Hauptstarter zu", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "devhub-composed-"));
+  try {
+    const frontend = path.join(root, "Bildwerk", "frontend");
+    await mkdir(frontend, { recursive: true });
+    await writeFile(path.join(frontend, "package.json"), JSON.stringify({
+      scripts: {
+        dev: 'concurrently --kill-others --names php1,worker,vite "npm:dev:php" "npm:dev:worker" "npm:dev:vite"',
+        "dev:php": "php -S 127.0.0.1:8787 -t ../public",
+        "dev:worker": "php -S 127.0.0.1:8790 -t ../public",
+        "dev:vite": "vite"
+      }
+    }));
+    const projects = await scanWorkspace(testConfig(root), path.join(root, "devhub-node"));
+    const launchers = projects[0].launchers;
+    const byScript = (script: string) => launchers.find((launcher) => launcher.command === `npm run ${script}`);
+    const dev = byScript("dev")!;
+    assert.equal(dev.preferred, true);
+    assert.equal(dev.parentId, null);
+    assert.deepEqual(dev.parts.map((part) => [part.script, part.port]), [["dev:php", 8787], ["dev:worker", 8790], ["dev:vite", null]]);
+    for (const part of dev.parts) {
+      const child = launchers.find((launcher) => launcher.id === part.launcherId)!;
+      assert.equal(child.parentId, dev.id, `${part.script} gehört zu dev`);
+      assert.equal(child.preferred, false);
+    }
+    assert.equal(byScript("dev:php")?.port, 8787);
+    assert.equal(projects[0].descriptionAuto, true);
+    assert.equal(projects[0].isSelf, false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

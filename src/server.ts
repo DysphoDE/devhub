@@ -68,6 +68,8 @@ function publicProject(project: ProjectDefinition): PublicProject {
     defaultUrl: project.defaultUrl,
     git: project.git,
     fileCount: project.fileCount,
+    isSelf: project.isSelf,
+    descriptionAuto: project.descriptionAuto,
     thumbnailUrl: project.thumbnailPath ? `/api/projects/${project.id}/thumbnail` : null,
     launchers: project.launchers.map(({ cwd: _cwd, executable: _executable, args: _args, ...launcher }) => ({
       ...launcher,

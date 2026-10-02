@@ -95,8 +95,24 @@ function activeLauncher(project) {
   return project.launchers.find((launcher) => ["starting", "running", "stopping"].includes(launcher.runtime.status));
 }
 
+// Teilskripte (z. B. dev:php unter einem concurrently-dev) startet ihr Hauptstarter mit, sie erscheinen nur als Teile.
+function topLaunchers(project) {
+  return project.launchers.filter((launcher) => !launcher.parentId);
+}
+
 function preferredLauncher(project) {
-  return activeLauncher(project) || project.launchers.find((launcher) => launcher.preferred) || project.launchers[0] || null;
+  const top = topLaunchers(project);
+  return activeLauncher(project) || top.find((launcher) => launcher.preferred) || top[0] || null;
+}
+
+function launcherParts(launcher) {
+  if (!launcher.parts?.length) return "";
+  const parentRunning = ["starting", "running"].includes(launcher.runtime.status);
+  return `<div class="wb-parts" aria-label="Startet mit">${launcher.parts.map((part) => {
+    const child = part.launcherId ? findLauncher(part.launcherId)?.launcher : null;
+    const on = parentRunning || ["starting", "running"].includes(child?.runtime.status);
+    return `<span class="wb-part ${on ? "on" : ""}" title="${escapeHtml(part.script)}${part.port ? ` · Port ${part.port}` : ""}">${escapeHtml(part.script)}${part.port ? `<b>${part.port}</b>` : ""}</span>`;
+  }).join("")}</div>`;
 }
 
 function runtimePort(launcher) {
@@ -126,9 +142,10 @@ function projectState(project) {
   const launcher = activeLauncher(project);
   const attention = projectAttentionReasons(project);
   if (attention[0]?.kind === "error") return { kind: "error", label: "Prozessfehler" };
+  if (project.isSelf) return { kind: "running", label: "diese Instanz" };
   if (launcher) return { kind: "running", label: `läuft${runtimePort(launcher) ? ` · ${runtimePort(launcher)}` : ""}` };
   if (attention[0]) return { kind: attention[0].kind, label: attention[0].label };
-  if (!project.launchers.length) return { kind: "folder", label: "kein Starter" };
+  if (!topLaunchers(project).length) return { kind: "folder", label: "kein Starter" };
   return { kind: "ready", label: "bereit" };
 }
 
@@ -236,7 +253,7 @@ function launcherRow(launcher) {
   const busy = ["starting", "stopping"].includes(runtime.status);
   const action = runtime.status === "running" ? "stop" : "start";
   return `<div class="launcher-row" data-launcher="${launcher.id}">
-    <div class="launcher-copy"><span class="launcher-name">${escapeHtml(launcher.name)}</span><code class="launcher-command" title="${escapeHtml(launcher.command)}">${escapeHtml(launcher.command)}</code></div>
+    <div class="launcher-copy"><span class="launcher-name">${escapeHtml(launcher.name)}</span><code class="launcher-command" title="${escapeHtml(launcher.command)}">${escapeHtml(launcher.command)}${launcher.parts?.length ? ` · startet ${launcher.parts.length} Teile` : ""}</code>${launcherParts(launcher)}</div>
     <span class="launcher-status ${runtime.status}">${statusLabels[runtime.status] || runtime.status}</span>
     <div class="launcher-tools">
       ${runtime.url && runtime.status === "running" ? `<a class="mini-action" href="${escapeHtml(runtime.url)}" data-open-id="${launcher.projectId}" target="_blank" rel="noopener noreferrer" aria-label="Im Browser öffnen"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i><span class="mini-label">Browser</span></a>` : ""}
@@ -292,7 +309,8 @@ function projectCard(project) {
   const [symbol, className] = techClass(project);
   const expanded = state.expandedProjects.has(project.id);
   const focusedLauncher = preferredLauncher(project);
-  const visibleLaunchers = expanded ? project.launchers : focusedLauncher ? [focusedLauncher] : [];
+  const top = topLaunchers(project);
+  const visibleLaunchers = expanded ? top : focusedLauncher ? [focusedLauncher] : [];
   const favorite = state.favorites.has(project.id);
   const editorName = state.capabilities?.editor.name || "Editor";
   return `<article class="project-card ${className} ${running ? "running" : ""}" data-project="${project.id}" tabindex="0" aria-label="Details zu ${escapeHtml(project.name)} öffnen">
@@ -305,14 +323,14 @@ function projectCard(project) {
       </div>
       <h2 title="${escapeHtml(project.name)}">${escapeHtml(project.name)}</h2>
       <code class="project-path" title="${escapeHtml(project.relativePath)}">${escapeHtml(project.relativePath)}</code>
-      <p class="project-description">${escapeHtml(project.description)}</p>
+      ${project.descriptionAuto ? "" : `<p class="project-description">${escapeHtml(project.description)}</p>`}
       <div class="tech-list">${project.technologies.slice(0, 5).map((technology) => `<span class="tech-chip">${escapeHtml(technology)}</span>`).join("")}</div>
       <div class="card-meta">
         ${project.git ? gitBranchMeta(project.git) : `<span class="meta-item">${project.fileCount} Dateien</span>`}
         <span class="meta-time">${relativeTime(project.modifiedAt)}</span>
       </div>
     </div>
-    ${project.launchers.length ? `<div class="launcher-panel focused-launcher-panel"><div class="launcher-panel-label"><span>${expanded ? "Alle Starter" : "Bevorzugter Starter"}</span><b>${project.launchers.length}</b></div>${visibleLaunchers.map(launcherRow).join("")}${project.launchers.length > 1 ? `<button class="more-launchers" data-expand="${project.id}">${expanded ? "Auf bevorzugten Starter reduzieren" : `${project.launchers.length - 1} weitere Starter anzeigen`}</button>` : ""}</div>` : ""}
+    ${top.length ? `<div class="launcher-panel focused-launcher-panel"><div class="launcher-panel-label"><span>${expanded ? "Alle Starter" : "Bevorzugter Starter"}</span><b>${top.length}</b></div>${visibleLaunchers.map(launcherRow).join("")}${top.length > 1 ? `<button class="more-launchers" data-expand="${project.id}">${expanded ? "Auf bevorzugten Starter reduzieren" : `${top.length - 1} weitere Starter anzeigen`}</button>` : ""}</div>` : ""}
     <div class="card-actions">
       ${primaryAction(project)}
       <button class="card-icon-action" data-project-action="editor" data-project-id="${project.id}" aria-label="In ${escapeHtml(editorName)} öffnen" ${state.capabilities?.editor.available ? "" : "disabled"}><i class="fa-solid fa-code" aria-hidden="true"></i><b>Editor</b></button>
@@ -979,8 +997,8 @@ function openProjectDetails(projectId) {
 }
 
 function renderStats() {
-  const launchers = state.projects.flatMap((project) => project.launchers);
-  const running = launchers.filter((launcher) => launcher.runtime.status === "running").length;
+  const launchers = state.projects.flatMap(topLaunchers);
+  const running = state.projects.flatMap((project) => project.launchers).filter((launcher) => launcher.runtime.status === "running").length;
   elements.runningCount.textContent = running;
   elements.projectCount.textContent = state.projects.length;
   elements.launcherCount.textContent = launchers.length;

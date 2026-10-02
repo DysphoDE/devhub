@@ -19,7 +19,10 @@ test("startet einen Prozess, erkennt seine URL und beendet ihn", async () => {
     executable: process.execPath,
     args: ["-e", "console.log('ready at http://localhost:43123/'); setInterval(() => {}, 1000)"],
     dynamicPort: false,
-    preferred: true
+    preferred: true,
+    port: null,
+    parentId: null,
+    parts: []
   };
 
   const running = await manager.start(launcher);
@@ -54,7 +57,10 @@ test("startet Batchdateien aus Windows-Pfaden mit Leerzeichen", { skip: process.
       executable: process.env.ComSpec ?? "cmd.exe",
       args: ["/d", "/s", "/c", `call "${batchPath}"`],
       dynamicPort: false,
-      preferred: true
+      preferred: true,
+      port: null,
+      parentId: null,
+      parts: []
     };
 
     await manager.start(launcher);

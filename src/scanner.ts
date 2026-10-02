@@ -305,10 +305,43 @@ function fileCommand(kind: LauncherKind, filePath: string): { executable: string
   return { executable: filePath, args: [], display: quotedName };
 }
 
+/** Liest einen fest eingetragenen Port aus einem Befehl, sofern er eindeutig dasteht. */
+export function portFromCommand(command: string): number | null {
+  const patterns = [/(?:--port[= ]|\s-p\s+)(\d{2,5})\b/, /\bPORT=(\d{2,5})\b/, /(?:127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\]):(\d{2,5})\b/];
+  for (const pattern of patterns) {
+    const port = Number(command.match(pattern)?.[1]);
+    if (port >= 1 && port <= 65535) return port;
+  }
+  return null;
+}
+
+/**
+ * Findet die Skripte, die ein Sammelskript per concurrently, npm-run-all, run-p oder run-s startet.
+ * Unterstützt `npm:name`, `npm run name` sowie Platzhalter wie `npm:dev:*`.
+ */
+export function composedScripts(command: string, available: string[], self: string): string[] {
+  if (!/\b(?:concurrently|npm-run-all|run-p|run-s)\b/.test(command)) return [];
+  const references: string[] = [];
+  for (const match of command.matchAll(/\bnpm:([\w:.*-]+)/g)) references.push(match[1]);
+  for (const match of command.matchAll(/\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?([\w:.-]+)/g)) if (match[1] !== "run") references.push(match[1]);
+  const runner = command.match(/\b(?:npm-run-all|run-p|run-s)\b((?:\s+[^\s&|;]+)+)/);
+  if (runner) for (const argument of runner[1].trim().split(/\s+/)) if (!argument.startsWith("-")) references.push(argument.replace(/^["']|["']$/g, ""));
+  const resolved: string[] = [];
+  for (const reference of references) {
+    const matcher = reference.includes("*") ? new RegExp(`^${reference.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`) : null;
+    for (const name of available) {
+      if (name === self || resolved.includes(name)) continue;
+      if (matcher ? matcher.test(name) : name === reference) resolved.push(name);
+    }
+  }
+  return resolved;
+}
+
 async function packageLaunchers(packagePath: string, projectId: string, projectPath: string): Promise<LauncherDefinition[]> {
   const packageJson = await readJson<PackageData>(packagePath);
   if (!packageJson) return [];
-  const scripts = Object.keys(packageJson.scripts ?? {})
+  const allScripts = packageJson.scripts ?? {};
+  const scripts = Object.keys(allScripts)
     .filter((name) => packageScriptPattern.test(name) && /^[a-zA-Z0-9:_-]+$/.test(name) && !/^(pre|post)/i.test(name))
     .sort((a, b) => {
       const priority = ["dev", "start", "serve", "preview"];
@@ -317,16 +350,30 @@ async function packageLaunchers(packagePath: string, projectId: string, projectP
   const cwd = path.dirname(packagePath);
   const manager = await detectPackageManager(cwd, projectPath, packageJson.packageManager);
   const relativeCwd = toPosix(path.relative(projectPath, cwd)) || ".";
-  return scripts.map((script, index) => {
+  const idFor = (script: string) => stableId(`${projectId}:${relativeCwd}:package:${script}`);
+  const launchers: LauncherDefinition[] = scripts.map((script, index) => {
     const command = packageCommand(manager, script);
     return {
-      id: stableId(`${projectId}:${relativeCwd}:package:${script}`), projectId,
+      id: idFor(script), projectId,
       name: relativeCwd === "." ? script : `${path.basename(cwd)} · ${script}`,
       kind: "package-script", relativeCwd, command: command.display, cwd,
       executable: command.executable, args: command.args, dynamicPort: false,
-      preferred: script === "dev" || (index === 0 && !scripts.includes("dev"))
+      preferred: script === "dev" || (index === 0 && !scripts.includes("dev")),
+      port: portFromCommand(allScripts[script] ?? ""), parentId: null, parts: []
     };
   });
+  // Sammelskripte zuerst, damit ein Teil dem bevorzugten Starter zugeordnet wird.
+  for (const launcher of [...launchers].sort((a, b) => Number(b.preferred) - Number(a.preferred))) {
+    const script = scripts[launchers.indexOf(launcher)];
+    const parts = composedScripts(allScripts[script] ?? "", Object.keys(allScripts), script);
+    if (!parts.length || launcher.parentId) continue;
+    launcher.parts = parts.map((part) => {
+      const child = scripts.includes(part) ? launchers[scripts.indexOf(part)] : null;
+      if (child && !child.parentId && !child.parts.length) child.parentId = launcher.id;
+      return { script: part, launcherId: child?.id ?? null, port: portFromCommand(allScripts[part] ?? "") };
+    });
+  }
+  return launchers;
 }
 
 async function readDirectoryEntries(directory: string): Promise<Dirent[]> {
@@ -660,8 +707,8 @@ async function scanProject(discovered: DiscoveredProject, config: AppConfig, own
     packageName,
     composerName
   ], namingSegment);
-  const inferredDescription = metadata.description || primaryPackage?.description || primaryComposer?.description || htmlMeta.description || readmeMeta.description
-    || autoDescription(sortedTechnologies, evidence.fileCount, evidence.truncated);
+  const writtenDescription = metadata.description || primaryPackage?.description || primaryComposer?.description || htmlMeta.description || readmeMeta.description;
+  const inferredDescription = writtenDescription || autoDescription(sortedTechnologies, evidence.fileCount, evidence.truncated);
 
   const launchers = (await Promise.all(evidence.packagePaths.map((packagePath) => packageLaunchers(packagePath, projectId, projectPath)))).flat();
   for (const starter of evidence.starterPaths) {
@@ -672,7 +719,7 @@ async function scanProject(discovered: DiscoveredProject, config: AppConfig, own
       id: stableId(`${projectId}:${relativeCwd}:${path.basename(starter.path).toLowerCase()}`), projectId,
       name: relativeCwd === "." ? path.basename(starter.path) : `${path.basename(cwd)} · ${path.basename(starter.path)}`,
       kind: starter.kind, relativeCwd, command: command.display, cwd, executable: command.executable,
-      args: command.args, dynamicPort: false, preferred: launchers.length === 0
+      args: command.args, dynamicPort: false, preferred: launchers.length === 0, port: null, parentId: null, parts: []
     });
   }
 
@@ -697,7 +744,7 @@ async function scanProject(discovered: DiscoveredProject, config: AppConfig, own
       id: stableId(`${projectId}:php-preview:${webRoot}`), projectId, name: "PHP-Vorschau", kind: "php-server",
       relativeCwd: toPosix(path.relative(projectPath, webRoot)) || ".", command: "php -S 127.0.0.1:{port}",
       cwd: webRoot, executable: isWindows ? "php.exe" : "php", args: ["-S", "127.0.0.1:{port}", "-t", webRoot], dynamicPort: true,
-      preferred: !hasPreferredLauncher
+      preferred: !hasPreferredLauncher, port: null, parentId: null, parts: []
     });
   } else if (preferredHtmlEntry && webRoot && !validPackages.length) {
     const staticServer = path.join(ownAppPath, "runtime", "static-server.mjs");
@@ -706,7 +753,7 @@ async function scanProject(discovered: DiscoveredProject, config: AppConfig, own
       id: stableId(`${projectId}:static-preview:${webRoot}`), projectId, name: "HTML-Vorschau", kind: "static-server",
       relativeCwd: toPosix(path.relative(projectPath, webRoot)) || ".", command: "DevHub Static Server · {port}",
       cwd: webRoot, executable: process.execPath, args: [staticServer, "--root", webRoot, "--port", "{port}", "--entry", entryFile], dynamicPort: true,
-      preferred: !hasPreferredLauncher
+      preferred: !hasPreferredLauncher, port: null, parentId: null, parts: []
     });
   }
 
@@ -729,7 +776,9 @@ async function scanProject(discovered: DiscoveredProject, config: AppConfig, own
     webRoot,
     git: await readGitInfo(evidence.gitRoot, projectPath),
     fileCount: evidence.fileCount,
-    launchers: isOwnApp ? [] : uniqueLaunchers
+    launchers: isOwnApp ? [] : uniqueLaunchers,
+    isSelf: isOwnApp,
+    descriptionAuto: !writtenDescription
   };
 }
 

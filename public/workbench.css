@@ -73,3 +73,11 @@
 .wb-attention-item p { flex: 1; min-width: 0; margin: 0; font-size: var(--type-body); line-height: 1.45; }
 .wb-attention-item p b { color: var(--ink); }
 @media (max-width: 720px) { .wb-attention-item { flex-wrap: wrap; } .wb-svc-pill small { display: none; } }
+
+/* Teile eines Sammelskripts, etwa dev:php · 8787 unter dev */
+.wb-parts { display: flex; flex-wrap: wrap; gap: 4px; padding-top: 6px; }
+.wb-part { display: inline-flex; align-items: center; gap: 5px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--wb-surface-2); color: var(--muted); font: 500 var(--type-micro)/1.2 var(--mono); }
+.wb-part b { color: var(--quiet); font-weight: 500; }
+.wb-part.on { border-color: transparent; background: var(--runtime-soft); color: var(--wb-runtime-ink); }
+.wb-part.on::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--runtime); }
+.wb-part.on b { color: var(--wb-runtime-ink); }
