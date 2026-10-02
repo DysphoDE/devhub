@@ -340,6 +340,7 @@ function projectCard(project) {
       </div>
       <h2 title="${escapeHtml(project.name)}">${escapeHtml(project.name)}</h2>
       <code class="project-path" title="${escapeHtml(project.relativePath)}">${escapeHtml(project.relativePath)}</code>
+      ${domainLink(project, "card-domain")}
       ${project.descriptionAuto ? "" : `<p class="project-description">${escapeHtml(project.description)}</p>`}
       <div class="tech-list">${project.technologies.slice(0, 5).map((technology) => `<span class="tech-chip">${escapeHtml(technology)}</span>`).join("")}</div>
       <div class="card-meta">
@@ -411,6 +412,15 @@ function sinceTime(isoDate) {
 
 const displayUrl = (url) => String(url || "").replace(/^https?:\/\//, "").replace(/\/$/, "");
 
+// Die Adresse, unter der Laragon, Herd oder Valet das Projekt ausliefert. Ist der Webserver aus, bleibt sie sichtbar, aber gedämpft.
+function domainLink(project, extraClass = "") {
+  if (!project.defaultUrl) return "";
+  const label = displayUrl(project.defaultUrl);
+  const secure = project.defaultUrl.startsWith("https:") ? '<i class="fa-solid fa-lock" aria-hidden="true"></i>' : '<i class="fa-solid fa-globe" aria-hidden="true"></i>';
+  if (webOnline()) return `<a class="wb-domain ${extraClass}" href="${escapeHtml(project.defaultUrl)}" data-open-id="${project.id}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(label)} im Browser öffnen">${secure}${escapeHtml(label)}</a>`;
+  return `<span class="wb-domain off ${extraClass}" title="${escapeHtml(state.stack?.webServerName || "Der Webserver")} ist aus, die Adresse antwortet gerade nicht">${secure}${escapeHtml(label)}</span>`;
+}
+
 function rowAction(project) {
   if (project.isSelf) return '<span class="wb-quiet">läuft bereits</span>';
   const launcher = activeLauncher(project);
@@ -421,9 +431,12 @@ function rowAction(project) {
     return `${url ? `<a class="wb-btn run" href="${escapeHtml(url)}" data-open-id="${project.id}" target="_blank" rel="noopener noreferrer"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>Öffnen</a>` : ""}<button type="button" class="wb-btn ${url ? "icon" : ""}" data-launcher-action="stop" data-id="${launcher.id}" aria-label="${escapeHtml(launcher.name)} stoppen" title="${escapeHtml(launcher.name)} stoppen"><i class="fa-solid fa-stop" aria-hidden="true"></i>${url ? "" : "Stoppen"}</button>`;
   }
   const preferred = preferredLauncher(project);
+  // Liefert der lokale Webserver das Projekt aus, ist die Adresse der Hauptweg. Ein Starter (etwa Vite für Assets) rückt daneben.
+  if (project.defaultUrl && webOnline()) {
+    const start = preferred ? `<button type="button" class="wb-btn icon" data-launcher-action="start" data-id="${preferred.id}" aria-label="${escapeHtml(preferred.name)} starten" title="${escapeHtml(preferred.name)} starten · ${escapeHtml(preferred.command)}"><i class="fa-solid fa-play" aria-hidden="true"></i></button>` : "";
+    return `<a class="wb-btn primary" href="${escapeHtml(project.defaultUrl)}" data-open-id="${project.id}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(displayUrl(project.defaultUrl))} öffnen"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>Öffnen</a>${start}`;
+  }
   if (preferred) return `<button type="button" class="wb-btn primary" data-launcher-action="start" data-id="${preferred.id}" title="${escapeHtml(preferred.name)} starten · ${escapeHtml(preferred.command)}"><i class="fa-solid fa-play" aria-hidden="true"></i>Starten</button>`;
-  const url = browserUrl(project);
-  if (url) return `<a class="wb-btn" href="${escapeHtml(url)}" data-open-id="${project.id}" target="_blank" rel="noopener noreferrer"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>Öffnen</a>`;
   return `<button type="button" class="wb-btn" data-project-action="folder" data-project-id="${project.id}"><i class="fa-regular fa-folder-open" aria-hidden="true"></i>Ordner</button>`;
 }
 
@@ -435,6 +448,7 @@ function projectRow(project) {
   const live = project.isSelf ? `<span class="wb-live">diese Instanz · ${escapeHtml(location.host)}</span>`
     : launcher ? `<span class="wb-live">${escapeHtml(launcher.name)}${launcher.runtime.url ? ` · ${escapeHtml(displayUrl(launcher.runtime.url))}` : ` · ${statusLabels[launcher.runtime.status]}`}</span>`
     : failed ? `<span class="wb-live error">${escapeHtml(failed.name)} · abgebrochen</span>` : "";
+  const domain = domainLink(project);
   const tech = project.technologies.slice(0, 3);
   const more = project.technologies.length - tech.length;
   const git = project.git ? gitStatusPresentation(project.git) : null;
@@ -442,7 +456,7 @@ function projectRow(project) {
   // Die Auswahl setzt renderPanel nachträglich, damit Zeilen beim Wechseln nicht neu entstehen und den Fokus behalten.
   return `<article class="wb-row ${status}" data-project="${project.id}" tabindex="0" role="button" aria-pressed="false" aria-label="${escapeHtml(project.name)}">
     <span class="wb-status ${status}" title="${statusTitle}"></span>
-    <span class="wb-row-name"><strong>${escapeHtml(project.name)}${favorite ? ' <i class="fa-solid fa-star wb-fav" aria-label="Favorit"></i>' : ""}</strong><small><span>${escapeHtml(project.relativePath)}</span>${live}</small></span>
+    <span class="wb-row-name"><strong>${escapeHtml(project.name)}${favorite ? ' <i class="fa-solid fa-star wb-fav" aria-label="Favorit"></i>' : ""}</strong><small>${domain}<span>${escapeHtml(project.relativePath)}</span>${live}</small></span>
     <span class="wb-techs">${tech.map((technology) => `<span class="wb-tech">${escapeHtml(technology)}</span>`).join("")}${more > 0 ? `<span class="wb-tech" title="${escapeHtml(project.technologies.slice(3).join(", "))}">+${more}</span>` : ""}</span>
     <span class="wb-git">${git ? `<i class="fa-solid fa-code-branch" aria-hidden="true"></i><code>${escapeHtml(project.git.branch || "detached")}</code><span class="wb-git-state ${git.kind}" title="${escapeHtml(git.title)}">${escapeHtml(git.label)}</span>` : '<span class="wb-quiet">kein Git</span>'}</span>
     <span class="wb-when" title="${escapeHtml(dateTime(project.modifiedAt))}">${shortAgo(project.modifiedAt)}</span>
@@ -514,6 +528,18 @@ function projectPanelHtml(project) {
   const favorite = state.favorites.has(project.id);
   const editorName = state.capabilities?.editor.name || "Editor";
   const blocks = [];
+  if (project.defaultUrl) {
+    const web = webOnline();
+    const stack = state.stack;
+    const label = displayUrl(project.defaultUrl);
+    const open = web
+      ? `<a class="wb-btn primary wb-addr-open" href="${escapeHtml(project.defaultUrl)}" data-open-id="${project.id}" target="_blank" rel="noopener noreferrer"><i class="fa-solid ${project.defaultUrl.startsWith("https:") ? "fa-lock" : "fa-globe"}" aria-hidden="true"></i><span>${escapeHtml(label)}</span><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a>`
+      : `<span class="wb-addr-open off"><i class="fa-solid fa-globe" aria-hidden="true"></i><span>${escapeHtml(label)}</span></span>`;
+    const note = web
+      ? `<p class="wb-hint">Ausgeliefert von ${escapeHtml(stack?.name || "deinem Stack")}${stack?.webServerName ? ` über ${escapeHtml(stack.webServerName)}` : ""}${project.defaultUrl.startsWith("https:") ? " mit HTTPS" : ""}.</p>`
+      : `<p class="wb-hint wb-addr-warn">${escapeHtml(stack?.webServerName || "Der Webserver")} ist aus, die Adresse antwortet gerade nicht.</p>${stackAction("start") ? `<button type="button" class="wb-btn" data-stack-action="start" ${state.stackPending ? "disabled" : ""}>Dienste starten</button>` : ""}`;
+    blocks.push(panelBlock("Im Browser", `<div class="wb-addr-row">${open}<button type="button" class="wb-btn icon ghost" data-copy-value="${escapeHtml(project.defaultUrl)}" data-copy-label="Adresse kopiert." aria-label="Adresse kopieren" title="Adresse kopieren"><i class="fa-regular fa-copy" aria-hidden="true"></i></button></div>${note}`));
+  }
   if (project.isSelf) blocks.push(panelBlock("Läuft", `<div class="wb-runbox running"><div class="wb-runbox-head"><span class="wb-status self"></span><strong>Diese DevHub-Instanz</strong><small>${escapeHtml(location.host)}</small></div><p class="wb-hint">DevHub bietet sich nicht selbst zum Starten an, weil es bereits läuft.</p></div>`));
   for (const launcher of project.launchers.filter((item) => item.runtime.status !== "stopped")) blocks.push(panelBlock(launcher.runtime.status === "error" ? "Abgebrochen" : "Läuft", runBox(launcher)));
   const top = topLaunchers(project);
@@ -524,11 +550,6 @@ function projectPanelHtml(project) {
     blocks.push(panelBlock(top.length === 1 ? "Starter" : `Starter · ${top.length}`, top.map((launcher) => starterRow(launcher, launcher.id === preferred?.id)).join("") + childList));
   } else if (!project.isSelf) {
     blocks.push(panelBlock("Starter", '<p class="wb-hint">Kein Starter erkannt. Editor, Terminal und Ordner stehen trotzdem bereit.</p>'));
-  }
-  if (project.defaultUrl) {
-    const web = webOnline();
-    const stack = state.stack;
-    blocks.push(panelBlock(`Adresse über ${escapeHtml(stack?.name || "den Webserver")}`, `<div class="wb-addr ${web ? "" : "off"}"><i class="fa-solid fa-globe" aria-hidden="true"></i>${web ? `<a href="${escapeHtml(project.defaultUrl)}" data-open-id="${project.id}" target="_blank" rel="noopener noreferrer">${escapeHtml(displayUrl(project.defaultUrl))}</a>` : `<span>${escapeHtml(displayUrl(project.defaultUrl))}</span>`}<small>${web ? "erreichbar" : `${escapeHtml(stack?.webServerName || "Webserver")} ist aus`}</small></div>${!web && stackAction("start") ? `<button type="button" class="wb-btn" data-stack-action="start" ${state.stackPending ? "disabled" : ""}>Dienste starten</button>` : ""}`));
   }
   const git = project.git;
   if (git) {
@@ -1037,7 +1058,11 @@ async function saveWorkspace(event) {
 }
 
 async function refreshStack() {
-  try { state.stack = (await api("/api/stack/status")).stack; renderServices(); } catch { /* next poll retries */ }
+  try {
+    const before = webOnline();
+    state.stack = (await api("/api/stack/status")).stack;
+    if (before !== webOnline()) render(); else renderServices();
+  } catch { /* next poll retries */ }
 }
 
 function webOnline() {
@@ -1055,7 +1080,7 @@ async function runStackAction(action) {
     if (action === "reload") setTimeout(rescan, 1100);
     if (action === "start" || action === "stop") setTimeout(refreshStack, 2500);
   } catch (error) { toast(error.message, "error"); }
-  finally { state.stackPending = null; renderServices(); }
+  finally { state.stackPending = null; render(); }
 }
 
 async function runProjectAction(projectId, action) {
