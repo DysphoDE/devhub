@@ -131,6 +131,7 @@
 .wb-split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
 .wb-split.with-panel { grid-template-columns: minmax(0, 1fr) minmax(320px, 380px); }
 .wb-split-main { min-width: 0; display: flex; flex-direction: column; container-type: inline-size; container-name: wb-list; }
+.wb-split-main > .project-grid, .wb-split-main > .empty-state { width: 100%; margin-inline: 0; }
 
 .project-grid.wb-rows { display: flex; flex-direction: column; gap: 4px; }
 .wb-row-head, .wb-row { display: grid; grid-template-columns: 14px minmax(0, 1fr) minmax(0, 150px) minmax(0, 140px) 84px 128px; align-items: center; gap: 14px; padding: 0 14px; }
@@ -283,12 +284,6 @@ html[data-theme="dark"] {
   --warning: #e2a23e;
   --danger: #f08080;
   --shadow: 0 15px 40px rgba(0, 0, 0, .42);
-  --gw-accent: #ee8650;
-  --gw-accent-dark: #f4a274;
-  --gw-accent-soft: #3a2418;
-  --gw-head: #121a28;
-  --gw-head-ink: #e8edf5;
-  --gw-head-muted: #8d9db6;
   --wb-surface-2: #1b2432;
   --wb-warning-ink: #ebb459;
   --wb-warning-soft: #31270f;
@@ -301,6 +296,22 @@ html[data-theme="dark"] {
   --wb-shadow-pop: 0 1px 2px rgba(0, 0, 0, .45), 0 18px 44px rgba(0, 0, 0, .5);
   --surface-ink: #1d2737;
   --surface-ink-2: #283548;
+}
+/* Die Git-Zentrale trägt einen eigenen Token-Satz auf .git-page und ihrem Dialog, deshalb dort überschreiben. */
+html[data-theme="dark"] .git-page, html[data-theme="dark"] .gw-dialog {
+  --gw-border: #273345;
+  --gw-muted: #9aa8bb;
+  --gw-ink: #e3e9f2;
+  --gw-blue: #7896ff;
+  --gw-soft: #1c2950;
+  --gw-surface: #161e2a;
+  --gw-surface-2: #1b2432;
+  --gw-accent: #ee8650;
+  --gw-accent-dark: #f4a274;
+  --gw-accent-soft: #3a2418;
+  --gw-head: #121a28;
+  --gw-head-ink: #e8edf5;
+  --gw-head-muted: #8d9db6;
 }
 html[data-theme="dark"] body { background: var(--canvas); color: var(--text); }
 html[data-theme="dark"] .sidebar, html[data-theme="dark"] .git-page-active .sidebar { background: #0b111a; }

@@ -32,7 +32,7 @@ button, input, select, textarea { font-family: var(--font-ui); }
 .brand-copy small { display: block; color: #8697b2; font: var(--type-micro)/1.4 var(--font-ui); margin-top: 4px; letter-spacing: 0; }
 .side-group { width: 100%; margin-top: 22px; }
 .side-label { display: block; margin: 0 10px 11px; color: #8fa0ba; font: 600 var(--type-micro)/1.4 var(--font-ui); letter-spacing: .08em; }
-.side-label-row { display: flex; }.side-label-row button { font-size: var(--type-micro); }
+
 .side-nav { display: grid; gap: 5px; }
 .side-link { width: 100%; min-height: 42px; grid-template-columns: 20px minmax(0,1fr) auto; justify-items: stretch; gap: 10px; padding: 8px 10px; color: #aebbd0; font-size: var(--type-caption); border-radius: 7px; }
 .side-link span:nth-child(2) { display: block; }
@@ -44,17 +44,14 @@ button, input, select, textarea { font-family: var(--font-ui); }
 .side-nav-divider { display: block; height: 1px; margin: 15px 8px 11px; background: #ffffff0d; }
 .side-context-label { padding: 0 10px 5px; color: #8fa0ba; font-size: var(--type-micro); font-weight: 550; }
 .project-filter-link.side-link { min-height: 36px; }
-.tech-filters { display: flex; padding: 0 5px; gap: 6px; }
-.tech-filter { font-size: var(--type-micro); padding: 5px 8px; border-radius: 5px; color: #98abc6; }
-.side-summary { display: grid; margin-top: auto; padding: 20px 7px 15px; gap: 8px; border-color: #ffffff0d; }
-.side-summary strong { font-size: 19px; }.side-summary span { color: #8fa1bd; font-size: var(--type-micro); }
+
 .sidebar-settings { display: flex; align-items: center; gap: 9px; padding: 10px; margin-top: 10px; border: 1px solid #ffffff0c; border-radius: 7px; background: #ffffff03; color: #a0b0c8; font-size: var(--type-micro); cursor: pointer; text-align: left; }
 .sidebar-settings > span { flex: 1; }.sidebar-settings:hover { background: #ffffff09; color: #d3dff4; }
 .sidebar-foot { display: flex; gap: 7px; padding: 12px 8px 0; min-height: 30px; border: 0; border-radius: 0; color: #8293ad; font-size: var(--type-micro); }
 .sidebar-foot span:not(.secure-dot),.sidebar-foot code { display: inline; }.sidebar-foot code { font-size: var(--type-micro); color: #8193ae; }
 .sidebar-git-repositories { flex: 1; min-height: 150px; display: flex; margin: 20px -5px 0; border-top: 1px solid #ffffff0d; }
-.git-page-active .side-summary { display: none; }
-.git-page-active .project-filter-link,.git-page-active .side-nav-divider,.git-page-active .stack-group { display: none; }
+
+.git-page-active .project-filter-link,.git-page-active .side-nav-divider { display: none; }
 .sidebar-git-repositories .gw-repositories { display: flex; flex-direction: column; width: 100%; max-height: none; min-height: 0; color: #acbdd6; background: transparent; border: 0; }
 .sidebar-git-repositories .gw-repositories > header { height: 50px; flex: 0 0 50px; padding: 0 8px; }
 .sidebar-git-repositories .gw-repositories > header > span { color: #91a3be; font-size: var(--type-micro); letter-spacing: .05em; }
@@ -99,7 +96,7 @@ button, input, select, textarea { font-family: var(--font-ui); }
   .sidebar,.git-page-active .sidebar { position: relative; display: flex; height: auto; padding: 15px; overflow: visible; }
   .sidebar-top { padding: 0 0 15px; }.brand-copy { display: block; }.brand-copy strong { font-size: 21px; }.brand-mark { width: 35px; height: 35px; }
   .sidebar .mobile-only { display: grid; }.sidebar > .side-group:first-of-type { display: block; margin: 13px 0 0; }
-  .sidebar > .side-group:first-of-type > .side-label,.sidebar .project-filter-link,.sidebar .side-nav-divider,.sidebar > .stack-group,.sidebar .side-summary,.sidebar .sidebar-foot,.sidebar .sidebar-settings { display: none; }
+  .sidebar > .side-group:first-of-type > .side-label,.sidebar .project-filter-link,.sidebar .side-nav-divider,.sidebar .sidebar-foot,.sidebar .sidebar-settings { display: none; }
   .side-nav { grid-template-columns: 1fr 1fr; gap: 8px; }.side-link { width: 100%; grid-template-columns: 18px minmax(0,1fr) auto; min-height: 42px; }
   .side-link span:nth-child(2),.side-link b { display: block; }.sidebar-git-repositories { margin-top: 15px; min-height: 0; }
   .sidebar-git-repositories .gw-repositories { display: grid; grid-template-columns: 130px 1fr; }
@@ -109,7 +106,7 @@ button, input, select, textarea { font-family: var(--font-ui); }
   :root { --workspace-gutter: 12px; }
   .workspace,.git-page-active .workspace { height: auto; min-height: 0; }
 
-  .mobile-workspace-tabs,.git-page-active .mobile-workspace-tabs { display: none; }.workspace-control-copy { display: none; }
+  .mobile-workspace-tabs,.git-page-active .mobile-workspace-tabs { display: none; }
   .gw-changes,.gw-history { display: flex; flex-direction: column; }.gw-files { flex: initial; max-height: 270px; }.gw-change-list { border-right: 0; }
   .gw-diff { min-height: 330px; max-height: 650px; border-top: 1px solid #e2e7ed; }.gw-view { overflow: visible; }.gw-shell { min-height: 600px; }
   .gw-statusbar { flex-wrap: wrap; font-size: var(--type-micro); }.gw-statusbar > span:last-child { font-size: var(--type-micro); }
