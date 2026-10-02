@@ -588,7 +588,7 @@ function renderPanel(visibleProjects) {
   if (!project && listAutoPanel && visibleProjects.length) project = visibleProjects[0];
   const show = state.page === "projects" && Boolean(project) && (state.panelOpen || listAutoPanel);
   elements.panel.hidden = !show;
-  document.querySelector("#project-split").classList.toggle("with-panel", show);
+  document.querySelector(".app-shell").classList.toggle("with-panel", show);
   document.body.classList.toggle("wb-panel-overlay", show && !widePanel.matches);
   if (!show) {
     elements.grid.querySelectorAll(".wb-row.selected").forEach((row) => { row.classList.remove("selected"); row.setAttribute("aria-pressed", "false"); });
