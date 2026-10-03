@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
-import { readGitCommit, readGitDiff, readGitHistory, runGitAction, suggestGitCommitMessage } from "../src/git-actions.js";
+import { fetchAllRepositories, readGitCommit, readGitDiff, readGitHistory, runGitAction, suggestGitCommitMessage } from "../src/git-actions.js";
 import { readGitInfo, scanWorkspace } from "../src/scanner.js";
 import type { AppConfig } from "../src/types.js";
 
@@ -154,6 +154,69 @@ test("ruft Remote-Änderungen ab und übernimmt sie nur per Fast-forward", async
     project.git = await readGitInfo(projectPath, projectPath);
     assert.equal(project.git?.behind, 0);
     assert.equal(project.git?.lastCommit?.subject, "Remote update");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("holt alle Repositories einmal und parallel, überspringt belegte und meldet Fehler", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "devhub-git-"));
+  try {
+    const remotes = path.join(root, "remotes");
+    const workspace = path.join(root, "workspace");
+    const seed = path.join(root, "seed");
+    await mkdir(remotes);
+    await mkdir(workspace);
+    await mkdir(seed);
+    await git(seed, "init", "-b", "main");
+    await git(seed, "config", "user.name", "DevHub Test");
+    await git(seed, "config", "user.email", "devhub@example.test");
+    await writeFile(path.join(seed, "readme.txt"), "one\n");
+    await git(seed, "add", "readme.txt");
+    await git(seed, "commit", "-m", "Initial commit");
+    for (const name of ["alpha", "beta", "gamma", "delta"]) {
+      await execFileAsync("git", ["clone", "-q", "--bare", seed, path.join(remotes, `${name}.git`)]);
+      await execFileAsync("git", ["clone", "-q", path.join(remotes, `${name}.git`), path.join(workspace, name)]);
+    }
+    await git(path.join(workspace, "gamma"), "remote", "set-url", "origin", path.join(remotes, "missing.git"));
+    await writeFile(path.join(seed, "readme.txt"), "two\n");
+    await git(seed, "commit", "-am", "Remote change");
+    await git(seed, "push", "-q", path.join(remotes, "alpha.git"), "main");
+
+    const projects = await scanWorkspace(testConfig(workspace), path.join(root, "devhub-node"));
+    const alpha = projects.find((project) => project.relativePath === "alpha")!;
+    // Zweites Projekt im selben Repository, wie Frontend und Backend eines Monorepos.
+    projects.push({ ...alpha, id: "alpha-frontend", name: "Alpha Frontend" });
+    const delta = path.join(workspace, "delta");
+
+    const claimed: string[] = [];
+    const settled = new Map<string, string[]>();
+    let running = 0;
+    let maxRunning = 0;
+    const result = await fetchAllRepositories(projects, {
+      claim: (repository) => {
+        if (repository === delta) return false;
+        claimed.push(repository);
+        running += 1;
+        maxRunning = Math.max(maxRunning, running);
+        return true;
+      },
+      settle: async (repository, members) => {
+        running -= 1;
+        settled.set(path.basename(repository), members.map((member) => member.id === "alpha-frontend" ? member.name : member.relativePath).sort());
+      }
+    });
+
+    assert.equal(result.fetched, 2);
+    assert.equal(result.skipped, 1);
+    assert.deepEqual(result.failed.map((item) => item.name), ["Gamma"]);
+    assert.equal(claimed.length, 3);
+    assert.ok(maxRunning > 1, "Fetches sollen gleichzeitig laufen");
+    assert.deepEqual(settled.get("alpha"), ["Alpha Frontend", "alpha"]);
+    assert.ok(settled.has("gamma"), "auch nach einem Fehler wird das Repository freigegeben");
+    assert.ok(!settled.has("delta"));
+    const remoteHead = (await execFileAsync("git", ["-C", path.join(workspace, "alpha"), "log", "-1", "--format=%s", "origin/main"])).stdout.trim();
+    assert.equal(remoteHead, "Remote change");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

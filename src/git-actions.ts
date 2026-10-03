@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import { moveToTrash, trashSupport } from "./platform.js";
+import { mapLimit } from "./scanner.js";
 import type { ProjectDefinition } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -319,6 +320,46 @@ export async function suggestGitCommitMessage(project: ProjectDefinition, reques
   const statuses = new Set(files.map((file) => file.indexStatus));
   const verb = statuses.size === 1 && statuses.has("A") ? "Add" : statuses.size === 1 && statuses.has("D") ? "Remove" : "Update";
   return `${verb} ${commitTarget(files)}`.slice(0, 200);
+}
+
+export interface FetchAllOptions {
+  /** Liefert false, wenn für das Repository bereits eine andere Git-Aktion läuft. */
+  claim(repository: string): boolean;
+  /** Läuft nach jedem Fetch, auch nach einem fehlgeschlagenen, mit allen Projekten des Repositorys. */
+  settle(repository: string, members: ProjectDefinition[]): Promise<void>;
+  concurrency?: number;
+}
+
+export interface FetchAllResult {
+  fetched: number;
+  skipped: number;
+  failed: { name: string; error: string }[];
+}
+
+// Projekte im selben Repository (etwa Frontend und Backend eines Monorepos) teilen sich einen Fetch.
+export async function fetchAllRepositories(projects: ProjectDefinition[], options: FetchAllOptions): Promise<FetchAllResult> {
+  const groups = new Map<string, ProjectDefinition[]>();
+  for (const project of projects) {
+    if (!project.git?.remoteName) continue;
+    const repository = path.resolve(project.absolutePath, project.git.repositoryRoot);
+    groups.set(repository, [...(groups.get(repository) ?? []), project]);
+  }
+  const result: FetchAllResult = { fetched: 0, skipped: 0, failed: [] };
+  await mapLimit([...groups], options.concurrency ?? 6, async ([repository, members]) => {
+    if (!options.claim(repository)) {
+      result.skipped += 1;
+      return;
+    }
+    try {
+      await runGitAction(members[0], "fetch", {});
+      result.fetched += 1;
+    } catch (error) {
+      result.failed.push({ name: members[0].name, error: error instanceof Error ? error.message : String(error) });
+    } finally {
+      await options.settle(repository, members);
+    }
+  });
+  return result;
 }
 
 export async function runGitAction(project: ProjectDefinition, action: GitAction, payload: GitActionPayload): Promise<string> {

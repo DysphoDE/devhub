@@ -465,7 +465,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
     };
     const stale = p => p.git.lastCommit && Date.now() - new Date(p.git.lastCommit.date).getTime() > 30 * 86400000;
     return `<header class="gw-header gw-header-overview"><div class="gw-seg gw-seg-static"><span class="gw-seg-icon">${icon("table-cells-large")}</span><span class="gw-seg-copy"><small>Arbeitsbereich</small><strong>Alle Repositories</strong><code>${plural(repositories.length, "Repository", "Repositories")}${latestFetch ? ` · zuletzt geholt ${ago(latestFetch)}` : ""}</code></span></div>
-      <div class="gw-header-tools gw-header-tools-wide">${button(icon(busy?.action === "fetch" ? "spinner fa-spin" : "arrows-rotate") + " Alle holen", "fetch-all", 'title="Fetch für jedes Repository mit Remote"', !repositories.some(p => p.git.remoteName))}${button(icon("arrow-up") + ` ${plural(pushable.length, "Repo", "Repos")} pushen`, "push-all", 'title="Alle Repositories mit lokalen Commits pushen"', !pushable.length, "gw-primary")}</div></header>
+      <div class="gw-header-tools gw-header-tools-wide">${button(icon(busy?.action === "fetch-all" ? "spinner fa-spin" : "arrows-rotate") + " Alle holen", "fetch-all", 'title="Fetch für jedes Repository mit Remote"', !repositories.some(p => p.git.remoteName))}${button(icon("arrow-up") + ` ${plural(pushable.length, "Repo", "Repos")} pushen`, "push-all", 'title="Alle Repositories mit lokalen Commits pushen"', !pushable.length, "gw-primary")}</div></header>
       ${notice ? `<div class="gw-notice ${notice.error ? "error" : "success"}" role="${notice.error ? "alert" : "status"}">${icon(notice.error ? "circle-exclamation" : "circle-check")}<span>${notice.id ? `<b>${esc(state.projects.find(x => x.id === notice.id)?.name || "")}</b> · ` : ""}${esc(notice.message)}</span>${button(icon("xmark"), "dismiss-notice", 'aria-label="Meldung schließen"', false, "gw-icon-button")}</div>` : ""}
       <div class="gw-view" data-gw-scroll="view"><section class="gw-overview">
         <div class="gw-kpis">${tiles.map(([value, label, total, tone]) => button(`<small>${label}</small><strong>${total}</strong>`, "ov-filter", `data-value="${value}" aria-pressed="${overviewFilter === value}"`, false, `gw-kpi tone-${tone} ${overviewFilter === value ? "active" : ""}`)).join("")}</div>
@@ -512,21 +512,21 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
   }
 
   async function run(action, payload = {}, id = selected()?.id) {
-    if (busy || (!id && !["clone", "github-clone"].includes(action))) return false;
+    if (busy || (!id && !["clone", "github-clone", "fetch-all"].includes(action))) return false;
     busy = { id, action }; notice = null; render();
     let success = false;
     try {
-      const result = await api(action === "clone" ? "/api/git/clone" : action === "github-clone" ? "/api/git/github/clone" : base(id) + action, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const result = await api(action === "clone" ? "/api/git/clone" : action === "github-clone" ? "/api/git/github/clone" : action === "fetch-all" ? "/api/git/fetch-all" : base(id) + action, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (result.project) { const i = state.projects.findIndex(p => p.id === result.project.id); if (i >= 0) state.projects[i] = result.project; }
       if (result.projects) state.projects = result.projects;
       if (["commit", "amend", "commit-files", "amend-files"].includes(action)) { Object.assign(session(id), { summary: "", description: "", amend: false, commit: null }); saveDraft(id); }
       if (["checkout", "checkout-remote", "create-branch"].includes(action)) Object.assign(session(id), { commit: null, file: null, comparison: null, amend: false, branchQuery: "" });
       if (action === "init") { state.activeGitProjectId = id; }
       if (action === "clone" || action === "github-clone") { const p = state.projects.find(p => p.relativePath === payload.name); if (p) { state.activeGitProjectId = p.id; view = "repo"; localStorage.setItem("devhub_git_project", p.id); } }
-      notice = { id: id || state.activeGitProjectId, message: result.message, error: false };
+      notice = { id: action === "fetch-all" ? null : id || state.activeGitProjectId, message: result.message, error: Boolean(result.failed) };
       success = true;
     } catch (error) {
-      notice = { id: id || state.activeGitProjectId, message: error.message, error: true };
+      notice = { id: action === "fetch-all" ? null : id || state.activeGitProjectId, message: error.message, error: true };
       // Failed merges/rebases may have created conflicts; refresh before presenting recovery actions.
       if (id && action !== "init") {
         try { const result = await api(base(id) + "refresh", { method: "POST" }); const i = state.projects.findIndex(p => p.id === id); if (i >= 0) state.projects[i] = result.project; } catch { /* retain original action error */ }
@@ -536,6 +536,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
       if (activity.length > 100) activity.length = 100;
       busy = null;
       if (id) invalidate(id);
+      if (action === "fetch-all") { cache.clear(); pendingReads.clear(); }
       renderApp();
       ensure(state.activeGitProjectId);
     }
@@ -637,7 +638,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
     if (action === "overview") { view = "overview"; localStorage.setItem("devhub_git_view", view); render(); return; }
     if (action === "ov-filter") { overviewFilter = target.dataset.value; render(); return; }
     if (action === "ov-action") { await run(target.dataset.action, {}, target.dataset.id); return; }
-    if (action === "fetch-all") { await runEach("fetch", state.projects.filter(x => x.git?.remoteName).map(x => x.id), "Fetch"); return; }
+    if (action === "fetch-all") { await run("fetch-all"); return; }
     if (action === "push-all") {
       const targets = state.projects.filter(x => x.git?.remoteName && x.git.branch && x.git.lastCommit && (x.git.ahead || !x.git.upstream) && !x.git.behind);
       modal("Repositories pushen", `${plural(targets.length, "Repository wird", "Repositories werden")} nacheinander zum Remote übertragen.`, `<ul class="gw-dialog-list">${targets.map(x => `<li><strong>${esc(x.name)}</strong><small>${esc(x.git.branch)} · ${x.git.upstream ? plural(x.git.ahead, "Commit", "Commits") : "veröffentlichen"}</small></li>`).join("")}</ul>`, "Alle pushen", async () => { dialog.close(); await runEach("push", targets.map(x => x.id), "Push"); return true; }); return;

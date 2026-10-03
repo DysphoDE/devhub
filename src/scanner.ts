@@ -782,7 +782,7 @@ async function scanProject(discovered: DiscoveredProject, config: AppConfig, own
   };
 }
 
-async function mapLimit<T, R>(items: T[], limit: number, mapper: (item: T) => Promise<R>): Promise<R[]> {
+export async function mapLimit<T, R>(items: T[], limit: number, mapper: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let cursor = 0;
   async function worker(): Promise<void> {

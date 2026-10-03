@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, getAppDirectory, saveScanRoot } from "./config.js";
-import { advancedGitActions, readGitWorkspace, readGitStash, readGitStats, readGitComparison, initializeGitRepository, cloneGitRepository, cloneGitHubRepository, listGitHubRepositories, readGitBranches, readGitCommit, readGitDiff, readGitHistory, runGitAction, suggestGitCommitMessage, type GitAction, type GitActionPayload } from "./git-actions.js";
+import { advancedGitActions, fetchAllRepositories, readGitWorkspace, readGitStash, readGitStats, readGitComparison, initializeGitRepository, cloneGitRepository, cloneGitHubRepository, listGitHubRepositories, readGitBranches, readGitCommit, readGitDiff, readGitHistory, runGitAction, suggestGitCommitMessage, type GitAction, type GitActionPayload } from "./git-actions.js";
 import { ProcessManager } from "./process-manager.js";
 import { readGitInfo, scanWorkspace } from "./scanner.js";
 import { isStackAction } from "./stack.js";
@@ -173,7 +173,8 @@ function startWorkspaceWatcher(): void {
   workspaceWatcher = null;
   try {
     workspaceWatcher = watch(config.scanRoot, { recursive: true, persistent: false }, (_eventType, filename) => {
-      if (isRelevantChange(typeof filename === "string" ? filename : null)) scheduleWorkspaceRefresh();
+      const relativePath = typeof filename === "string" ? filename : null;
+      if (isRelevantChange(relativePath) && !isOwnGitWrite(relativePath)) scheduleWorkspaceRefresh();
     });
     workspaceWatcher.on("error", (error) => {
       console.warn(`Workspace-Überwachung unterbrochen: ${error instanceof Error ? error.message : error}`);
@@ -247,7 +248,25 @@ function serveStatic(requestPath: string, response: ServerResponse): void {
 }
 
 const busyRepositories = new Set<string>();
+const quietGitUntil = new Map<string, number>();
 let cloningRepository = false;
+
+function releaseRepository(repository: string): void {
+  busyRepositories.delete(repository);
+  // FSEvents meldet die Schreibzugriffe von Git teils erst nach dem Ende der Aktion.
+  quietGitUntil.set(repository, Date.now() + 3000);
+}
+
+// Git-Aktionen aktualisieren ihr Projekt selbst. Ihre Schreibzugriffe in .git (FETCH_HEAD, Refs)
+// sollen keinen zusätzlichen Scan des ganzen Workspaces auslösen.
+function isOwnGitWrite(relativePath: string | null): boolean {
+  if (!relativePath) return false;
+  const segments = relativePath.split(/[\\/]+/).filter(Boolean);
+  const gitIndex = segments.findIndex((segment) => segment.toLowerCase() === ".git");
+  if (gitIndex === -1) return false;
+  const repository = path.resolve(config.scanRoot, ...segments.slice(0, gitIndex));
+  return busyRepositories.has(repository) || (quietGitUntil.get(repository) ?? 0) > Date.now();
+}
 
 const server = createServer(async (request, response) => {
   if (!isLoopback(request.socket.remoteAddress)) {
@@ -457,24 +476,45 @@ const server = createServer(async (request, response) => {
       const repository = path.resolve(project.absolutePath, project.git?.repositoryRoot || ".");
       if (busyRepositories.has(repository)) throw new Error("Für dieses Repository läuft bereits eine Git-Aktion.");
       busyRepositories.add(repository);
+      let message: string;
       try {
         const payload = await readJsonBody(request) as GitActionPayload;
         if (gitActionMatch[2] === "init") {
           await initializeGitRepository(project);
           project.git = await readGitInfo(project.absolutePath, project.absolutePath);
-          sendJson(response, 200, { message: "Git-Repository angelegt.", project: publicProject(project) });
+          message = "Git-Repository angelegt.";
         } else {
           await refreshProjectGit(project);
-          const message = await runGitAction(project, gitActionMatch[2] as GitAction, payload);
-          await refreshProjectGit(project);
-          sendJson(response, 200, { message, project: publicProject(project) });
+          message = await runGitAction(project, gitActionMatch[2] as GitAction, payload);
         }
       } finally {
         // Auch ein fehlgeschlagener Merge kann einen neuen Konfliktzustand hinterlassen.
-        await refreshProjectGit(project);
+        if (gitActionMatch[2] !== "init") await refreshProjectGit(project);
         broadcastProjects();
-        busyRepositories.delete(repository);
+        releaseRepository(repository);
       }
+      sendJson(response, 200, { message, project: publicProject(project) });
+      return;
+    }
+
+    if (request.method === "POST" && pathname === "/api/git/fetch-all") {
+      if (!requireToken(request, response)) return;
+      const result = await fetchAllRepositories(projects, {
+        claim: (repository) => {
+          if (busyRepositories.has(repository)) return false;
+          busyRepositories.add(repository);
+          return true;
+        },
+        settle: async (repository, members) => {
+          await Promise.all(members.map(refreshProjectGit));
+          releaseRepository(repository);
+        }
+      });
+      broadcastProjects();
+      const parts = [`Fetch: ${result.fetched === 1 ? "1 Repository" : `${result.fetched} Repositories`} abgerufen`];
+      if (result.skipped) parts.push(`${result.skipped} übersprungen, weil dort bereits eine Git-Aktion läuft`);
+      if (result.failed.length) parts.push(`${result.failed.length} fehlgeschlagen (${result.failed.map(item => `${item.name}: ${item.error}`).join("; ")})`);
+      sendJson(response, 200, { message: `${parts.join(", ")}.`, failed: result.failed.length, projects: publicProjects() });
       return;
     }
 
