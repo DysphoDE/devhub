@@ -99,6 +99,14 @@ function filePaths(files: GitInfoFile[], includeOriginal = false): string[] {
   return [...new Set(files.flatMap((file) => includeOriginal && file.originalPath ? [file.path, file.originalPath] : [file.path]))];
 }
 
+// git add fails for paths that are neither on disk nor in the index (e.g. an already staged deletion).
+async function addPaths(repository: string, paths: string[]): Promise<void> {
+  const indexed = new Set((await git(repository, ["ls-files", "-z", "--", ...paths])).split("\0"));
+  const present = await Promise.all(paths.map((file) => lstat(path.join(repository, file)).then(() => true, () => false)));
+  const stageable = paths.filter((file, index) => present[index] || indexed.has(file));
+  if (stageable.length) await git(repository, ["add", "-A", "--", ...stageable]);
+}
+
 function friendlyGitError(error: unknown): Error {
   const raw = error && typeof error === "object" && "stderr" in error ? String(error.stderr) : error instanceof Error ? error.message : String(error);
   const text = raw.trim();
@@ -115,7 +123,7 @@ function friendlyGitError(error: unknown): Error {
 
 async function git(repository: string, args: string[], timeout = 15_000): Promise<string> {
   try {
-    const { stdout } = await execFileAsync("git", [...(["commit", "add", "restore", "reset", "rm", "clean", "diff", "show", "diff-tree"].includes(args[0]) ? ["--literal-pathspecs"] : []), "-C", repository, ...args], {
+    const { stdout } = await execFileAsync("git", [...(["commit", "add", "restore", "reset", "rm", "clean", "diff", "show", "diff-tree", "ls-files"].includes(args[0]) ? ["--literal-pathspecs"] : []), "-C", repository, ...args], {
       timeout,
       windowsHide: true,
       maxBuffer: 1_000_000,
@@ -129,7 +137,7 @@ async function git(repository: string, args: string[], timeout = 15_000): Promis
 
 async function gitDiff(repository: string, args: string[], allowDifferenceExit = false): Promise<string> {
   try {
-    const { stdout } = await execFileAsync("git", [...(["commit", "add", "restore", "reset", "rm", "clean", "diff", "show", "diff-tree"].includes(args[0]) ? ["--literal-pathspecs"] : []), "-C", repository, ...args], {
+    const { stdout } = await execFileAsync("git", [...(["commit", "add", "restore", "reset", "rm", "clean", "diff", "show", "diff-tree", "ls-files"].includes(args[0]) ? ["--literal-pathspecs"] : []), "-C", repository, ...args], {
       timeout: 15_000,
       windowsHide: true,
       maxBuffer: 5_000_000,
@@ -322,7 +330,7 @@ export async function runGitAction(project: ProjectDefinition, action: GitAction
   if (action === "refresh") return "Git-Status aktualisiert.";
   if (action === "stage") {
     const file = knownFiles(project, [payload.file]);
-    await git(repository, ["add", "-A", "--", ...filePaths(file, true)]);
+    await addPaths(repository, filePaths(file, true));
     return "Datei vorgemerkt.";
   }
   if (action === "unstage") {
@@ -331,7 +339,7 @@ export async function runGitAction(project: ProjectDefinition, action: GitAction
 
   if (action === "stage-files") {
     const files = knownFiles(project, payload.files);
-    await git(repository, ["add", "-A", "--", ...filePaths(files, true)]);
+    await addPaths(repository, filePaths(files, true));
     return `${files.length} ${files.length === 1 ? "Datei wurde" : "Dateien wurden"} vorgemerkt.`;
   }
   if (action === "unstage-files") {
@@ -581,7 +589,7 @@ async function runAdvancedGitAction(project: ProjectDefinition, action: GitActio
     if (await git(repository, ["ls-files", "--unmerged"])) throw new Error("Löse zuerst alle Dateikonflikte auf.");
     if (action === "amend-files") await requireUnpublished(project);
     const paths = filePaths(files, true);
-    await git(repository, ["add", "-A", "--", ...paths]);
+    await addPaths(repository, paths);
     // --only commits the selected working files and preserves excluded entries in the index.
     await git(repository, ["commit", "--only", ...(action === "amend-files" ? ["--amend"] : []), "-m", message, ...(description ? ["-m", description] : []), "--", ...paths], 30_000);
     return `${files.length} ${files.length === 1 ? "Datei" : "Dateien"} committet.`;

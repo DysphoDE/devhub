@@ -24,6 +24,32 @@ async function git(repository: string, ...args: string[]): Promise<void> {
   await execFileAsync("git", ["-C", repository, ...args], { windowsHide: true });
 }
 
+test("committet bereits vorgemerkte Löschungen zusammen mit neuen Dateien", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "devhub-git-"));
+  try {
+    const projectPath = path.join(root, "git-project");
+    await mkdir(projectPath);
+    await git(projectPath, "init", "-b", "main");
+    await git(projectPath, "config", "core.autocrlf", "false");
+    await git(projectPath, "config", "user.name", "DevHub Test");
+    await git(projectPath, "config", "user.email", "devhub@example.test");
+    await writeFile(path.join(projectPath, "old.txt"), "old\n");
+    await git(projectPath, "add", "old.txt");
+    await git(projectPath, "commit", "-m", "Initial commit");
+    await git(projectPath, "rm", "-q", "old.txt");
+    await writeFile(path.join(projectPath, "new.txt"), "new\n");
+
+    const [project] = await scanWorkspace(testConfig(root), path.join(root, "devhub-node"));
+    await runGitAction(project, "stage-files", { files: ["old.txt"] });
+    await runGitAction(project, "commit-files", { files: ["old.txt", "new.txt"], message: "Replace old file" });
+    project.git = await readGitInfo(projectPath, projectPath);
+    assert.equal(project.git?.lastCommit?.subject, "Replace old file");
+    assert.equal(project.git?.files.length, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("listet Git-Dateien und committet nur vorgemerkte Änderungen", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "devhub-git-"));
   try {
