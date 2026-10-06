@@ -190,10 +190,47 @@ async function openApp(home: ValetHome): Promise<string> {
   throw new Error(`Die ${home.name}-App wurde nicht gefunden.`);
 }
 
+const HERD_SERVICES = ["herd", "nginx", "php-fpm"];
+
+/**
+ * Wartet, bis die Herd-App und ihre Dienste laufen, und gibt ihr danach noch einen Moment,
+ * ihren eigenen Start abzuschließen. Liefert false, wenn sie innerhalb der Frist nicht auftauchen.
+ */
+export async function waitForHerdServices(
+  readNames: () => Promise<Set<string>> = runningProcessNames,
+  { timeoutMs = 20_000, intervalMs = 500, settleMs = 2_000, sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)) } = {}
+): Promise<boolean> {
+  for (let waited = 0; waited <= timeoutMs; waited += intervalMs) {
+    const names = await readNames();
+    if (HERD_SERVICES.every((name) => names.has(name))) {
+      await sleep(settleMs);
+      return true;
+    }
+    await sleep(intervalMs);
+  }
+  return false;
+}
+
+/**
+ * "herd start|stop|restart" schickt nur ein AppleScript an die App. Läuft sie nicht, öffnet macOS
+ * sie dafür – und Herd startet beim Öffnen seine Dienste selbst. Trifft der Befehl gleichzeitig ein,
+ * startet Herd alles doppelt; die überzähligen Prozesse sterben weg, und Herd hing danach mit
+ * Dauerlast auf mehreren Kernen an deren Pipes. Daher die App vorher selbst öffnen und abwarten.
+ * Liefert true, wenn die Dienste dabei frisch gestartet wurden.
+ */
+async function launchHerdIfNeeded(home: ValetHome): Promise<boolean> {
+  if (!isMac || home.provider !== "herd") return false;
+  if ((await runningProcessNames()).has("herd")) return false;
+  await openApp(home);
+  return waitForHerdServices();
+}
+
 async function runAction(config: AppConfig, action: StackActionId): Promise<string> {
   const home = await locateHome(config);
   if (!home) throw new Error("Herd oder Valet wurde nicht gefunden.");
   if (action === "open") return openApp(home);
+  const freshlyStarted = await launchHerdIfNeeded(home);
+  if (freshlyStarted && (action === "start" || action === "reload")) return `${home.name} wurde geöffnet und hat seine Dienste gestartet.`;
   if (action === "start") { await runCli(home, ["start"]); return `${home.name}-Dienste werden gestartet.`; }
   if (action === "stop") { await runCli(home, ["stop"]); return `${home.name}-Dienste werden gestoppt.`; }
   await runCli(home, ["restart"]);

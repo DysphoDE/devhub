@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { defaultHerdRoot, herdStack } from "../src/herd.js";
+import { defaultHerdRoot, herdStack, waitForHerdServices } from "../src/herd.js";
 import { scanWorkspace } from "../src/scanner.js";
 import { resetStackCache, resolveStack } from "../src/stack-registry.js";
 import type { AppConfig } from "../src/types.js";
@@ -29,6 +29,19 @@ async function createHerd(root: string, parkedPath: string): Promise<string> {
 test("liefert Standardordner je Plattform", () => {
   assert.equal(defaultHerdRoot("darwin", "/Users/jan"), "/Users/jan/Library/Application Support/Herd");
   assert.equal(defaultHerdRoot("win32", "C:\\Users\\jan"), path.join("C:\\Users\\jan", ".config", "herd"));
+});
+
+test("wartet auf die Herd-Dienste, bevor ein Befehl die App erreicht", async () => {
+  const snapshots = [["herd"], ["herd", "nginx"], ["herd", "nginx", "php-fpm"]];
+  const sleeps: number[] = [];
+  const ready = await waitForHerdServices(async () => new Set(snapshots.shift() ?? []), {
+    intervalMs: 10, settleMs: 50, sleep: async (ms) => { sleeps.push(ms); }
+  });
+  assert.equal(ready, true);
+  assert.deepEqual(sleeps, [10, 10, 50]);
+
+  const timedOut = await waitForHerdServices(async () => new Set(["herd"]), { timeoutMs: 30, intervalMs: 10, sleep: async () => {} });
+  assert.equal(timedOut, false);
 });
 
 test("leitet Herd-Domains aus geparkten Ordnern, Links und Zertifikaten ab", async () => {
