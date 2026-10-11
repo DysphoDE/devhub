@@ -172,16 +172,29 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
     return marks || `<b class="gw-mark clean" title="Synchron">${icon("check")}</b>`;
   }
 
-  // Header: repository · branch · the one sync action that fits the current state.
+  // Kopfzeile in einer Zeile: Repository / Branch als Brotkrumen (beide öffnen ihr Menü), die Ansichten als Segment,
+  // rechts der eine Sync-Schritt, der zum Zustand passt, und das Repository-Menü.
   function header(p, w) {
-    const g = p.git; const info = syncInfo(p, w);
+    const g = p.git; const info = syncInfo(p, w); const s = session(p.id);
     const syncing = busy && ["fetch", "pull", "push", "continue"].includes(busy.action);
-    const segment = (value, glyph, label, strong, code, title, popover) => `<div class="gw-seg-wrap"><button type="button" class="gw-seg gw-seg-menu ${menu === value ? "open" : ""}" data-gw="menu" data-value="${value}" aria-haspopup="dialog" aria-expanded="${menu === value}" title="${title}"><span class="gw-seg-icon">${icon(glyph)}</span><span class="gw-seg-copy"><small>${label}</small>${strong}${code}</span>${icon("chevron-down")}</button>${menu === value ? popover() : ""}</div>`;
-    return `<header class="gw-header">
-      ${segment("repo", "book-bookmark", "Repository", `<strong>${esc(p.name)}</strong>`, `<code title="${esc(p.relativePath)}">${esc(p.relativePath)}</code>`, "Repository wechseln", () => repoPopover(p))}
-      ${segment("branch", "code-branch", "Branch", `<strong class="gw-mono">${esc(g.branch || "Detached HEAD")}</strong>`, `<code>${g.upstream ? `verfolgt ${esc(g.upstream)}` : g.remoteName ? "noch kein Upstream" : "nur lokal"}</code>`, "Branch wechseln oder erstellen", () => branchPopover(p, w))}
-      <div class="gw-seg gw-seg-sync tone-${info.tone}"><span class="gw-seg-icon">${icon(syncing ? "spinner fa-spin" : info.glyph)}</span><span class="gw-seg-copy"><small>${info.hint}</small><strong>${esc(info.title)}</strong></span>${info.chip ? `<span class="gw-chip tone-${info.tone}">${info.chip}</span>` : ""}${info.action ? button(esc(info.action.label), info.action.gw, info.action.attrs || "", info.action.disabled, `gw-seg-action ${info.action.style || ""}`) : ""}</div>
-      <div class="gw-header-tools">${button(icon("code"), "editor", 'aria-label="Im Editor öffnen" title="Im Editor öffnen"', !state.capabilities?.editor.available, "gw-icon-button")}${button(icon("terminal"), "terminal", 'aria-label="Terminal öffnen" title="Terminal öffnen"', !state.capabilities?.terminal.available, "gw-icon-button")}${button(icon(busy?.action === "refresh" ? "spinner fa-spin" : "rotate"), "refresh", 'aria-label="Git-Status aktualisieren" title="Aktualisieren · ⌘/Ctrl R"', false, "gw-icon-button")}</div></header>`;
+    const crumb = (value, glyph, label, title, popover) => `<span class="gw-seg-wrap"><button type="button" class="gw-crumb gw-seg-menu ${menu === value ? "open" : ""}" data-gw="menu" data-value="${value}" aria-haspopup="dialog" aria-expanded="${menu === value}" title="${title}">${icon(glyph)}${label}${icon("chevron-down")}</button>${menu === value ? popover() : ""}</span>`;
+    const secondary = { branches: ["diagram-project", "Branches"], stashes: ["box-archive", "Stashes"], tags: ["tag", "Tags"], settings: ["sliders", "Repository"] }[s.tab];
+    const tab = (value, label, total) => button(`<span>${label}</span>${total ? `<b>${total}</b>` : ""}`, "tab", `data-value="${value}" aria-pressed="${s.tab === value}"`, false, s.tab === value ? "active" : "");
+    const action = info.action;
+    const sync = action
+      ? button(`${icon(syncing ? "spinner fa-spin" : info.glyph)}<span>${esc(action.label)}</span>`, action.gw, `${action.attrs || ""} title="${esc(info.title)} · ${esc(info.hint)}"`, action.disabled, `gw-bar-action ${action.style || ""}`)
+      : `<span class="gw-bar-state">${icon(syncing ? "spinner fa-spin" : info.glyph)}${esc(info.title)}</span>`;
+    return `<header class="gw-bar">
+      <nav class="gw-crumbs" aria-label="Repository und Branch">
+        ${crumb("repo", "book-bookmark", `<strong>${esc(p.name)}</strong>`, `${esc(p.relativePath)} · Repository wechseln`, () => repoPopover(p))}
+        <span class="gw-crumb-sep" aria-hidden="true">/</span>
+        ${crumb("branch", "code-branch", `<strong class="gw-mono">${esc(g.branch || "Detached HEAD")}</strong>`, `${g.upstream ? `verfolgt ${esc(g.upstream)}` : g.remoteName ? "noch kein Upstream" : "nur lokal"} · Branch wechseln oder erstellen`, () => branchPopover(p, w))}
+      </nav>
+      <nav class="gw-segtabs" aria-label="Ansicht">${tab("changes", "Änderungen", g.changedFiles)}${tab("history", "Verlauf")}${secondary ? `<span class="gw-segtab-extra">${tab(s.tab, secondary[1])}${button(icon("xmark"), "tab", 'data-value="changes" aria-label="Zurück zu den Änderungen" title="Schließen"', false, "gw-icon-button")}</span>` : ""}</nav>
+      <span class="gw-bar-spacer"></span>
+      <div class="gw-bar-sync tone-${info.tone}"><span class="gw-bar-hint" title="${esc(info.hint)}">${info.chip ? `<span class="gw-chip tone-${info.tone}">${info.chip}</span>` : ""}${esc(info.hint)}</span>${sync}</div>
+      <span class="gw-more-wrap">${button(icon("ellipsis"), "menu", `data-value="more" aria-haspopup="menu" aria-expanded="${menu === "more"}" aria-label="Repository-Menü" title="Repository-Menü"`, false, `gw-icon-button gw-more ${menu === "more" ? "open" : ""}`)}${menu === "more" ? morePopover(p, w) : ""}</span>
+    </header>`;
   }
   function repoPopover(p) {
     const repositories = state.projects.filter(x => x.git).sort((a, b) => Number(Boolean(b.git.dirty)) - Number(Boolean(a.git.dirty)) || a.name.localeCompare(b.name, "de"));
@@ -231,6 +244,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
       ${item("code", "Im Editor", "editor", "", "", !state.capabilities?.editor.available)}
       ${item("terminal", "Im Terminal", "terminal", "", "", !state.capabilities?.terminal.available)}
       ${item("folder-open", "Ordner zeigen", "folder")}
+      ${item("rotate", "Git-Status neu lesen", "refresh")}
       <p class="gw-menu-label">Workspace</p>
       ${item("table-cells-large", "Alle Repositories", "overview")}
       ${item("plus", "Repository klonen oder anlegen …", "add")}</div>`;
@@ -242,15 +256,6 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
     if (info.key === "clean") return "";
     return `<div class="gw-guide tone-${info.tone}" role="status">${icon(info.glyph)}<p>${info.guide}</p><div class="gw-guide-actions">${(info.actions || []).map(([label, action, attrs, style]) => button(label, action, attrs, false, `gw-small ${style}`)).join("")}${info.dismissible ? button(icon("xmark"), "dismiss-guide", `data-value="${info.key}" aria-label="Hinweis nicht mehr zeigen" title="Für diesen Zustand nicht mehr zeigen"`, false, "gw-icon-button") : ""}</div></div>`;
   }
-  function navigation(p, w) {
-    const s = session(p.id);
-    const secondary = { branches: ["diagram-project", "Branches"], stashes: ["box-archive", "Stashes"], tags: ["tag", "Tags"], settings: ["sliders", "Repository"] }[s.tab];
-    const tab = (value, glyph, label, total) => button(`${icon(glyph)}<span>${label}</span>${total ? `<b>${total}</b>` : ""}`, "tab", `data-value="${value}" aria-pressed="${s.tab === value}"`, false, s.tab === value ? "active" : "");
-    return `<nav class="gw-tabs" aria-label="Git-Arbeitsbereich">${tab("changes", "pen-to-square", "Änderungen", p.git.changedFiles)}${tab("history", "clock-rotate-left", "Verlauf")}${secondary ? `<span class="gw-tab-secondary">${tab(s.tab, secondary[0], secondary[1])}${button(icon("xmark"), "tab", 'data-value="changes" aria-label="Zurück zu den Änderungen"', false, "gw-icon-button")}</span>` : ""}
-      <span class="gw-tabs-spacer"></span>
-      <span class="gw-more-wrap">${button(icon("ellipsis") + " Repository " + icon("chevron-down"), "menu", `data-value="more" aria-haspopup="menu" aria-expanded="${menu === "more"}"`, false, `gw-more ${menu === "more" ? "open" : ""}`)}${menu === "more" ? morePopover(p, w) : ""}</span></nav>`;
-  }
-
   function commitStatus(p) {
     const s = session(p.id); const w = data(p.id, "workspace");
     const total = s.advanced ? count(p, staged) : includedFiles(p).length;
@@ -560,9 +565,8 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
     const showOverview = view === "overview" && repositories.length > 0;
     const body = !repositories.length ? empty("code-branch", "Dein Git-Arbeitsbereich", "Klone ein Repository oder aktiviere Git in einem vorhandenen Projekt.", button("Repository hinzufügen", "add", "", false, "gw-primary"))
       : showOverview ? overviewView(repositories)
-      : header(p, w) + guide(p, w) + navigation(p, w) + (notice?.id === p.id ? `<div class="gw-notice ${notice.error ? "error" : "success"}" role="${notice.error ? "alert" : "status"}">${icon(notice.error ? "circle-exclamation" : "circle-check")}<span>${esc(notice.message)}</span>${button(icon("xmark"), "dismiss-notice", 'aria-label="Meldung schließen"', false, "gw-icon-button")}</div>` : "") + `<div class="gw-view" data-gw-scroll="view">${s.tab === "changes" ? changeView(p) : s.tab === "history" ? historyView(p) : s.tab === "branches" ? branchView(p, w) : s.tab === "stashes" ? stashView(p, w) : s.tab === "tags" ? tagsView(p, w) : settingsView(p, w)}</div>`;
-    const statusbar = `<footer class="gw-statusbar"><span>${busy ? icon("spinner fa-spin") + " Git-Aktion läuft …" : icon("circle-check") + " Bereit"}</span>${p && !showOverview ? `<span class="gw-mono">${esc(p.git.upstream || (p.git.remoteName ? "Noch kein Upstream" : "Lokales Repository"))}</span><span>${icon("arrow-up")} ${p.git.ahead} <i class="gw-footer-divider"></i>${icon("arrow-down")} ${p.git.behind}</span>` : ""}</footer>`;
-    const html = `<div class="gw-shell ${menu ? "menu-open" : ""}"><main class="gw-main" aria-label="Git-Repository">${body}${statusbar}</main></div>`;
+      : header(p, w) + guide(p, w) + (notice?.id === p.id ? `<div class="gw-notice ${notice.error ? "error" : "success"}" role="${notice.error ? "alert" : "status"}">${icon(notice.error ? "circle-exclamation" : "circle-check")}<span>${esc(notice.message)}</span>${button(icon("xmark"), "dismiss-notice", 'aria-label="Meldung schließen"', false, "gw-icon-button")}</div>` : "") + `<div class="gw-view" data-gw-scroll="view">${s.tab === "changes" ? changeView(p) : s.tab === "history" ? historyView(p) : s.tab === "branches" ? branchView(p, w) : s.tab === "stashes" ? stashView(p, w) : s.tab === "tags" ? tagsView(p, w) : settingsView(p, w)}</div>`;
+    const html = `<div class="gw-shell ${menu ? "menu-open" : ""}"><main class="gw-main" aria-label="Git-Repository">${body}</main></div>`;
     if (root.__gwHtml !== html) {
       root.__gwHtml = html;
       root.innerHTML = html;

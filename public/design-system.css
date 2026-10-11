@@ -59,7 +59,6 @@ button, input, select, textarea { font-family: var(--font-ui); }
 .gw-patch .diff-line { font-size: var(--type-code); line-height: 25px; min-height: 25px; }
 .gw-patch .diff-line > span,.gw-patch .diff-line.hunk,.gw-patch .diff-line.meta { font-size: var(--type-micro); }
 .gw-patch .diff-line > code { font-size: inherit; }
-.gw-statusbar { font-size: var(--type-micro); gap: 14px; min-height: 33px; }.gw-statusbar > span:last-child { font-size: inherit; }
 .gw-section-heading h3 { font-size: var(--type-section); }
 .gw-row-copy strong,.gw-card h4,.gw-history-row strong { font-size: var(--type-body); }
 .gw-row-copy small,.gw-history-row small,.gw-row-copy code,.gw-history-row code { font-size: var(--type-micro); }
@@ -84,7 +83,6 @@ button, input, select, textarea { font-family: var(--font-ui); }
   .mobile-workspace-tabs,.git-page-active .mobile-workspace-tabs { display: none; }
   .gw-changes,.gw-history { display: flex; flex-direction: column; }.gw-files { flex: initial; max-height: 270px; }.gw-change-list { border-right: 0; }
   .gw-diff { min-height: 330px; max-height: 650px; border-top: 1px solid #e2e7ed; }.gw-view { overflow: visible; }.gw-shell { min-height: 600px; }
-  .gw-statusbar { flex-wrap: wrap; font-size: var(--type-micro); }.gw-statusbar > span:last-child { font-size: var(--type-micro); }
   .gw-history-list { max-height: 330px; }.gw-history-detail { min-height: 350px; max-height: 650px; }
 }
 
