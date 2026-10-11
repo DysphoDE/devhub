@@ -18,6 +18,10 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
   let github = null;
   let githubLoading = false;
   let githubQuery = "";
+  // Offene Pull Requests und CI-Status aus GitHub, geladen sobald die Übersicht sichtbar ist, höchstens alle zwei Minuten.
+  let githubStatus = null;
+  let githubStatusAt = 0;
+  let githubStatusLoading = false;
   try { dismissedGuides = new Set(JSON.parse(localStorage.getItem("devhub_git_guides") || "[]")); } catch { /* ignore */ }
   const icon = name => `<i class="fa-solid fa-${name}" aria-hidden="true"></i>`;
   const selected = () => state.projects.find(p => p.id === state.activeGitProjectId);
@@ -460,6 +464,25 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
       <section class="gw-card"><header><h4>${icon("list-check")} Aktivität dieser Sitzung</h4></header><div class="gw-activity">${activity.filter(a => a.id === p.id).slice(0, 12).map(a => `<div class="${a.error ? "error" : ""}">${icon(a.error ? "circle-exclamation" : "circle-check")}<span>${esc(a.message)}</span><time>${a.time}</time></div>`).join("") || '<p class="gw-card-note">Git-Aktionen und ihre Ergebnisse erscheinen hier.</p>'}</div></section></div></section>`;
   }
 
+  function loadGitHubStatus(force = false) {
+    if (githubStatusLoading || (!force && Date.now() - githubStatusAt < 120_000)) return;
+    githubStatusLoading = true;
+    api(`/api/git/github/status${force ? "?force=1" : ""}`)
+      .then(result => { githubStatus = result; })
+      .catch(() => { githubStatus = null; })
+      .finally(() => { githubStatusLoading = false; githubStatusAt = Date.now(); render(); });
+  }
+  const ciLabels = { success: ["circle-check", "CI grün"], failure: ["circle-xmark", "CI rot"], running: ["circle-notch fa-spin", "CI läuft"], cancelled: ["circle-minus", "CI abgebrochen"] };
+  function githubLine(p) {
+    const gh = githubStatus?.repositories?.[p.id];
+    if (!gh || (!gh.pullRequests.length && !gh.ci)) return "";
+    const link = (href, cls, title, body) => `<a class="${cls}" href="${esc(href)}" target="_blank" rel="noopener noreferrer" title="${esc(title)}">${body}</a>`;
+    const pulls = gh.pullRequests.length ? link(gh.pullRequestsUrl, "gw-gh-pulls", gh.pullRequests.map(pr => `#${pr.number} ${pr.title}${pr.draft ? " (Entwurf)" : ""}`).join("\n"), `${icon("code-pull-request")} ${plural(gh.pullRequests.length, "PR offen", "PRs offen")}`) : "";
+    const [glyph, label] = gh.ci ? ciLabels[gh.ci.state] : [];
+    const ci = gh.ci ? link(gh.ci.url, `gw-gh-ci ${gh.ci.state}`, `${gh.ci.workflow} · ${gh.ci.branch} · ${ago(gh.ci.updatedAt)}`, `${icon(glyph)} ${label}`) : "";
+    return `<div class="gw-board-gh">${pulls}${ci}</div>`;
+  }
+
   // Overview: every repository as a card with its state, the commit activity of the last 30 days and the one action that is due.
   function overviewView(repositories) {
     const conflicts = p => p.git.files.some(conflict);
@@ -499,8 +522,10 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
         <div class="gw-board-meta"><code>${esc(p.relativePath)} · ${esc(p.git.branch || "detached")}</code><small>${plural(total(p), "Commit", "Commits")} in 30 Tagen</small></div>
         ${spark(p)}
         <p class="gw-board-commit" title="${esc(p.git.lastCommit?.subject || "")}">${p.git.lastCommit ? esc(p.git.lastCommit.subject) : '<span class="gw-muted">Noch kein Commit</span>'}</p>
+        ${githubLine(p)}
         <footer><span>${p.git.lastCommit ? ago(p.git.lastCommit.date) : ""}</span>${p.git.staleBranches?.length ? button(`${icon("broom")} ${plural(p.git.staleBranches.length, "alter Branch", "alte Branches")}`, "cleanup-branches", `data-id="${p.id}" title="Aufräumen: ${esc(p.git.staleBranches.join(", "))}"`, false, "gw-link gw-board-stale") : ""}${quick(p)}</footer>
       </article>`;
+    queueMicrotask(() => loadGitHubStatus());
     const noGitCard = p => `<article class="gw-board-card gw-board-nogit"><span class="gw-board-nogit-icon">${icon("code-branch")}</span><strong>${esc(p.name)}</strong><small>Noch kein Git-Repository</small>${button("Git anlegen", "init-dialog", `data-id="${p.id}"`)}</article>`;
     return `<header class="gw-board-head">
         <div class="gw-board-filters" role="group" aria-label="Repositories filtern">${filterChips.map(([value, label, count]) => button(`${label} <b>${count}</b>`, "ov-filter", `data-value="${value}" aria-pressed="${overviewFilter === value}"`, false, `gw-filter ${overviewFilter === value ? "active" : ""}`)).join("")}</div>
@@ -674,7 +699,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
     if (action === "overview") { view = "overview"; localStorage.setItem("devhub_git_view", view); render(); return; }
     if (action === "ov-filter") { overviewFilter = target.dataset.value; render(); return; }
     if (action === "ov-action") { await run(target.dataset.action, {}, target.dataset.id); return; }
-    if (action === "fetch-all") { await run("fetch-all"); return; }
+    if (action === "fetch-all") { if (await run("fetch-all")) loadGitHubStatus(true); return; }
     if (action === "push-all") {
       const targets = state.projects.filter(x => x.git?.remoteName && x.git.branch && x.git.lastCommit && (x.git.ahead || !x.git.upstream) && !x.git.behind);
       modal("Repositories pushen", `${plural(targets.length, "Repository wird", "Repositories werden")} nacheinander zum Remote übertragen.`, `<ul class="gw-dialog-list">${targets.map(x => `<li><strong>${esc(x.name)}</strong><small>${esc(x.git.branch)} · ${x.git.upstream ? plural(x.git.ahead, "Commit", "Commits") : "veröffentlichen"}</small></li>`).join("")}</ul>`, "Alle pushen", async () => { dialog.close(); await runEach("push", targets.map(x => x.id), "Push"); return true; }); return;

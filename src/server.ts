@@ -8,7 +8,8 @@ import { loadConfig, getAppDirectory, saveScanRoot } from "./config.js";
 import { advancedGitActions, fetchAllRepositories, readGitWorkspace, readGitStash, readGitStats, readGitComparison, initializeGitRepository, cloneGitRepository, cloneGitHubRepository, listGitHubRepositories, readGitBranches, readGitCommit, readGitDiff, readGitHistory, runGitAction, suggestGitCommitMessage, type GitAction, type GitActionPayload } from "./git-actions.js";
 import { markInstalled } from "./dependencies.js";
 import { ProcessManager } from "./process-manager.js";
-import { readGitInfo, scanWorkspace } from "./scanner.js";
+import { githubCliReady, githubRepository, readGitHubStatus } from "./github-status.js";
+import { mapLimit, readGitInfo, scanWorkspace } from "./scanner.js";
 import { isStackAction } from "./stack.js";
 import { darkThemeStylesheet } from "./theme.js";
 import { resolveStack } from "./stack-registry.js";
@@ -118,6 +119,13 @@ processManager.onChange((launcherId, runtime) => {
 processManager.onLog((launcherId, entry) => broadcast("log", { launcherId, entry }));
 
 let lastProjectsPayload = "";
+
+// Ob gh installiert und angemeldet ist, ändert sich selten; geprüft wird höchstens alle fünf Minuten.
+let githubCliCheck: { at: number; value: Promise<{ ready: boolean; hint: string | null }> } | null = null;
+function githubCliStatus() {
+  if (!githubCliCheck || Date.now() - githubCliCheck.at > 300_000) githubCliCheck = { at: Date.now(), value: githubCliReady() };
+  return githubCliCheck.value;
+}
 
 function broadcastProjects(): void {
   const payload = JSON.stringify({ projects: publicProjects() });
@@ -441,6 +449,17 @@ const server = createServer(async (request, response) => {
         return;
       }
       sendJson(response, 200, { branches: await readGitBranches(project) });
+      return;
+    }
+
+    // Offene Pull Requests und letzter CI-Lauf je GitHub-Repository. ?force=1 umgeht den Zwischenspeicher.
+    if (request.method === "GET" && pathname === "/api/git/github/status") {
+      const cli = await githubCliStatus();
+      if (!cli.ready) { sendJson(response, 200, { available: false, hint: cli.hint, repositories: {} }); return; }
+      const force = url.searchParams.get("force") === "1";
+      const linked = projects.filter((project) => githubRepository(project.git?.remoteUrl ?? null));
+      const entries = await mapLimit(linked, 4, async (project) => [project.id, await readGitHubStatus(githubRepository(project.git!.remoteUrl)!, project.git!.branch, force).catch(() => null)] as const);
+      sendJson(response, 200, { available: true, hint: null, repositories: Object.fromEntries(entries.filter(([, status]) => status)) });
       return;
     }
 

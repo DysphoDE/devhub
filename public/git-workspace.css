@@ -352,6 +352,13 @@
 .gw-spark rect.recent { fill: var(--gw-blue); }
 .gw-board-commit { margin: 0; color: var(--gw-ink); font-size: var(--type-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gw-board-card > footer { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--gw-border); color: var(--gw-muted); font-size: var(--type-micro); }
+.gw-board-gh { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: -4px; font-size: var(--type-micro); }
+.gw-board-gh a { display: inline-flex; align-items: center; gap: 5px; color: var(--gw-muted); text-decoration: none; }
+.gw-board-gh a:hover { color: var(--gw-blue); }
+.gw-board-gh .gw-gh-pulls { color: var(--gw-blue); font-weight: 600; }
+.gw-gh-ci.success i { color: #1e7a4d; }
+.gw-gh-ci.failure { color: #b42323; font-weight: 600; }
+.gw-gh-ci.running i { color: #9a6612; }
 .gw-board-card > footer > span:first-child { margin-right: auto; }
 .gw-board-card > footer .gw-button { min-height: 28px; font-size: var(--type-micro); }
 .gw-board-card > footer .gw-board-stale { padding: 0 6px; color: var(--gw-muted); }
