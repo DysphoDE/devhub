@@ -563,9 +563,10 @@ export async function readGitInfo(repositoryPath: string | null, projectPath: st
   if (!repositoryPath) return null;
   try {
     const options = { timeout: 5000, windowsHide: true, maxBuffer: 2_000_000 };
-    const [statusResult, logResult, remoteResult, fetchHeadResult] = await Promise.all([
+    const [statusResult, logResult, activityResult, remoteResult, fetchHeadResult] = await Promise.all([
       execFileAsync("git", ["-C", repositoryPath, "status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"], options),
       execFileAsync("git", ["-C", repositoryPath, "log", "-1", "--format=%h%x1f%s%x1f%an%x1f%aI"], options).catch(() => ({ stdout: "", stderr: "" })),
+      execFileAsync("git", ["-C", repositoryPath, "log", "--since=31.days", "--max-count=2000", "--format=%at"], options).catch(() => ({ stdout: "", stderr: "" })),
       execFileAsync("git", ["-C", repositoryPath, "remote", "get-url", "origin"], options).catch(() => ({ stdout: "", stderr: "" })),
       execFileAsync("git", ["-C", repositoryPath, "rev-parse", "--git-path", "FETCH_HEAD"], options).catch(() => ({ stdout: "", stderr: "" }))
     ]);
@@ -621,6 +622,7 @@ export async function readGitInfo(repositoryPath: string | null, projectPath: st
       repositoryRoot: toPosix(path.relative(projectPath, repositoryPath)) || ".",
       files: files.slice(0, 500),
       filesTruncated: files.length > 500,
+      activity: commitActivity(activityResult.stdout),
       lastCommit
     };
   } catch {
@@ -629,9 +631,24 @@ export async function readGitInfo(repositoryPath: string | null, projectPath: st
       branch: head.match(/^ref:\s+refs\/heads\/(.+)$/)?.[1]?.trim() ?? null,
       dirty: false, ahead: 0, behind: 0, staged: 0, unstaged: 0, untracked: 0, changedFiles: 0,
       remoteName: null, remoteUrl: null, upstream: null, lastFetchAt: null, repositoryRoot: toPosix(path.relative(projectPath, repositoryPath)) || ".",
-      files: [], filesTruncated: false, lastCommit: null
+      files: [], filesTruncated: false, activity: commitActivity(""), lastCommit: null
     } : null;
   }
+}
+
+// Zählt Commits pro Kalendertag (lokale Zeit) für die letzten 30 Tage; Index 29 ist heute.
+export function commitActivity(timestamps: string, now = new Date()): number[] {
+  const days = new Array<number>(30).fill(0);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  for (const line of timestamps.split(/\r?\n/)) {
+    const seconds = Number(line.trim());
+    if (!line.trim() || !Number.isFinite(seconds)) continue;
+    const date = new Date(seconds * 1000);
+    const day = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+    const index = 29 - Math.round((today - day) / 86400000);
+    if (index >= 0 && index < 30) days[index] += 1;
+  }
+  return days;
 }
 
 // Ohne passenden Virtual Host reicht der Pfad unterhalb des Apache-DocumentRoot: Ein Projekt in

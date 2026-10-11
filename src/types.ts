@@ -69,6 +69,8 @@ export interface GitInfo {
     worktreeStatus: string;
   }>;
   filesTruncated: boolean;
+  /** Commits pro Tag der letzten 30 Tage, ältester Tag zuerst, heute zuletzt. */
+  activity: number[];
   lastCommit: {
     hash: string;
     subject: string;

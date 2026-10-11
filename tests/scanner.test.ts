@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { composedScripts, portFromCommand, scanWorkspace } from "../src/scanner.js";
+import { commitActivity, composedScripts, portFromCommand, scanWorkspace } from "../src/scanner.js";
 import type { AppConfig } from "../src/types.js";
 
 function testConfig(root: string): AppConfig {
@@ -352,4 +352,15 @@ test("ordnet die Teile eines Sammelskripts dem Hauptstarter zu", async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("counts commits per local day for the last 30 days", () => {
+  const now = new Date(2026, 9, 10, 15, 0);
+  const at = (day: number, hour: number) => String(Math.floor(new Date(2026, 9, day, hour).getTime() / 1000));
+  const days = commitActivity([at(10, 9), at(10, 0), at(9, 23), at(11, 1), at(10 - 29, 12), at(10 - 30, 12), "", "x"].join("\n"), now);
+  assert.equal(days.length, 30);
+  assert.equal(days[29], 2);
+  assert.equal(days[28], 1);
+  assert.equal(days[0], 1);
+  assert.equal(days.reduce((sum, n) => sum + n, 0), 4);
 });

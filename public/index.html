@@ -23,14 +23,11 @@
       <div class="sidebar-top">
         <a class="brand" href="/" aria-label="DevHub Startseite">
           <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-          <span class="brand-copy"><strong>DevHub</strong><small>Dein Entwicklungsplatz</small></span>
+          <span class="brand-copy"><strong>DevHub</strong></span>
         </a>
+        <button id="theme-toggle" class="wb-theme-toggle" type="button" aria-label="Darstellung wechseln"><i class="fa-solid fa-circle-half-stroke" aria-hidden="true"></i></button>
         <button id="mobile-search" class="sidebar-icon mobile-only" aria-label="Suche öffnen"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></button>
       </div>
-
-      <button id="palette-open" class="wb-palette-trigger" type="button" aria-haspopup="dialog" aria-controls="palette">
-        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><span>Springen zu …</span><kbd id="palette-shortcut">⌘K</kbd>
-      </button>
 
       <section class="side-group" aria-labelledby="views-heading">
         <p class="side-label" id="views-heading">Arbeitsbereich</p>
@@ -48,12 +45,11 @@
       <div id="sidebar-git-repositories" class="sidebar-git-repositories" hidden></div>
 
 
-      <button id="sidebar-workspace-settings" class="sidebar-settings"><i class="fa-solid fa-folder-tree" aria-hidden="true"></i><span>Workspace verwalten</span><i class="fa-solid fa-sliders" aria-hidden="true"></i></button>
-      <div class="sidebar-foot">
-        <span class="secure-dot" title="DevHub ist nur von diesem Rechner aus erreichbar"></span>
-        <code id="local-address" title="DevHub ist nur von diesem Rechner aus erreichbar">127.0.0.1</code>
-        <button id="theme-toggle" class="wb-theme-toggle" type="button" aria-label="Darstellung wechseln"><i class="fa-solid fa-circle-half-stroke" aria-hidden="true"></i></button>
-      </div>
+      <button id="sidebar-workspace-settings" class="sidebar-workspace" type="button" title="Workspace verwalten: Ordner wählen und neu einlesen">
+        <i class="fa-solid fa-folder-tree" aria-hidden="true"></i>
+        <span><strong>Workspace</strong><small><span class="secure-dot" title="DevHub ist nur von diesem Rechner aus erreichbar"></span><code id="local-address">127.0.0.1</code></small></span>
+        <i class="fa-solid fa-sliders" aria-hidden="true"></i>
+      </button>
     </aside>
 
     <main class="workspace">
@@ -75,7 +71,7 @@
             <i class="fa-solid fa-magnifying-glass global-search-icon" aria-hidden="true"></i>
             <span id="workspace-search-label" class="sr-only">Projekte durchsuchen</span>
             <input id="search" type="search" placeholder="Projekte durchsuchen …" autocomplete="off">
-            <kbd id="search-shortcut">/</kbd>
+            <button id="palette-open" class="wb-search-palette" type="button" aria-haspopup="dialog" aria-controls="palette" title="Befehlspalette: Projekte, Aktionen und GitHub-Repositories"><kbd id="palette-shortcut">⌘K</kbd></button>
           </label>
           <div class="wb-svc" id="svc">
             <button id="svc-pill" class="wb-svc-pill" type="button" aria-expanded="false" aria-controls="svc-panel" aria-haspopup="dialog">

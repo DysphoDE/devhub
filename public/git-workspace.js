@@ -9,7 +9,6 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
   const activity = [];
   let busy = null;
   let notice = null;
-  let repoFilter = "all";
   let searchTimer;
   let menu = null;
   let menuQuery = "";
@@ -35,6 +34,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
   const data = (id, resource) => cache.get(key(id, resource));
   const base = id => `/api/projects/${id}/git/`;
   const conflict = f => f.indexStatus === "U" || f.worktreeStatus === "U" || ["AA", "DD"].includes(f.indexStatus + f.worktreeStatus);
+  const needsAttention = p => Boolean(p.git.dirty || p.git.ahead || p.git.behind);
   const staged = f => !conflict(f) && ![".", "?"].includes(f.indexStatus);
   const working = f => conflict(f) || f.worktreeStatus !== ".";
   const includedFiles = p => p.git.files.filter(f => !session(p.id).excluded.has(f.path));
@@ -148,17 +148,24 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
     return { key, ...table[key] };
   }
 
+  // Seitenleiste: eine Zeile pro Repository, rechts sein Zustand (●3 geändert, ↑2 ungepusht, ↓1 hinterher, ! Konflikt).
+  // Gefiltert wird über die Suche in der Kopfzeile.
   function repositoryRail(repositories) {
     const q = state.gitQuery.toLocaleLowerCase();
-    const filtered = repositories.filter(p => `${p.name} ${p.relativePath} ${p.git.branch}`.toLocaleLowerCase().includes(q) && (repoFilter === "all" || (repoFilter === "changed" ? p.git.dirty : p.git.ahead || p.git.behind)));
-    const dirty = repositories.filter(p => p.git.dirty).length;
-    return `<aside class="gw-repositories" aria-label="Repositories"><header><span>REPOSITORIES <b>${repositories.length}</b></span>${button(icon("plus"), "add", 'aria-label="Repository hinzufügen" title="Repository klonen oder anlegen"', false, "gw-icon-button")}</header>
-      <label class="gw-search">${icon("magnifying-glass")}<input type="search" data-gw-input="repoQuery" data-focus-key="gw-repo-search" aria-label="Repositories durchsuchen" placeholder="Repository suchen …" value="${esc(state.gitQuery)}"></label>
-      <div class="gw-segments" aria-label="Repositories filtern">${[["all", "Alle"], ["changed", "Geändert"], ["sync", "Sync"]].map(([value, label]) => button(label, "filter", `data-value="${value}" aria-pressed="${repoFilter === value}"`, false, repoFilter === value ? "active" : "")).join("")}</div>
+    const filtered = repositories.filter(p => `${p.name} ${p.relativePath} ${p.git.branch}`.toLocaleLowerCase().includes(q));
+    const open = repositories.filter(needsAttention).length;
+    return `<aside class="gw-repositories" aria-label="Repositories"><header><span>Repositories</span>${button(icon("plus"), "add", 'aria-label="Repository hinzufügen" title="Repository klonen oder anlegen"', false, "gw-icon-button")}</header>
       <div class="gw-repo-list" data-gw-scroll="repositories">
-        <button class="gw-repo gw-repo-overview ${view === "overview" ? "active" : ""}" data-gw="overview" aria-pressed="${view === "overview"}"><span class="gw-repo-icon">${icon("table-cells-large")}</span><span><strong>Übersicht</strong><small>${plural(repositories.length, "Repository", "Repositories")}</small></span><span class="gw-repo-count ${dirty ? "dirty" : "clean"}">${dirty || icon("check")}</span></button>
-        ${filtered.map(p => `<button class="gw-repo ${view === "repo" && p.id === state.activeGitProjectId ? "active" : ""}" data-gw="repository" data-id="${p.id}" title="${esc(p.name)}" aria-pressed="${view === "repo" && p.id === state.activeGitProjectId}"><span class="gw-repo-icon">${icon("book-bookmark")}</span><span><strong>${esc(p.name)}</strong><small>${icon("code-branch")} ${esc(p.git.branch || "Detached HEAD")}${p.git.ahead ? ` <em class="ahead">↑${p.git.ahead}</em>` : ""}${p.git.behind ? ` <em class="behind">↓${p.git.behind}</em>` : ""}</small></span><span class="gw-repo-count ${p.git.files.some(conflict) ? "conflict" : p.git.dirty ? "dirty" : "clean"}">${p.git.files.some(conflict) ? icon("triangle-exclamation") : p.git.dirty ? p.git.changedFiles : icon("check")}</span></button>`).join("") || `<p class="gw-list-empty">Keine passenden Repositories.</p>`}</div>
-      <footer><span class="gw-live-dot"></span><span>Lokaler Workspace</span><small>${dirty} geändert</small></footer></aside>`;
+        <button class="gw-repo gw-repo-overview ${view === "overview" ? "active" : ""}" data-gw="overview" aria-pressed="${view === "overview"}" title="Alle Repositories auf einen Blick"><span class="gw-repo-icon">${icon("table-cells-large")}</span><span class="gw-repo-name">Übersicht</span><span class="gw-marks">${open ? `<small>${open} offen</small>` : `<b class="gw-mark clean">${icon("check")}</b>`}</span></button>
+        ${filtered.map(p => `<button class="gw-repo ${view === "repo" && p.id === state.activeGitProjectId ? "active" : ""}" data-gw="repository" data-id="${p.id}" title="${esc(p.name)} · ${esc(p.git.branch || "Detached HEAD")}" aria-pressed="${view === "repo" && p.id === state.activeGitProjectId}"><span class="gw-repo-name">${esc(p.name)}</span><span class="gw-marks">${repoMarks(p)}</span></button>`).join("") || `<p class="gw-list-empty">Kein Repository passt zur Suche.</p>`}</div></aside>`;
+  }
+  function repoMarks(p) {
+    const g = p.git;
+    if (g.files.some(conflict)) return `<b class="gw-mark conflict" title="Konflikt">${icon("triangle-exclamation")}</b>`;
+    const marks = [g.dirty ? `<b class="gw-mark dirty" title="${plural(g.changedFiles, "Datei geändert", "Dateien geändert")}">●${g.changedFiles}</b>` : "",
+      g.ahead ? `<b class="gw-mark ahead" title="${plural(g.ahead, "Commit", "Commits")} nicht gepusht">↑${g.ahead}</b>` : "",
+      g.behind ? `<b class="gw-mark behind" title="${plural(g.behind, "Commit", "Commits")} zum Holen">↓${g.behind}</b>` : ""].join("");
+    return marks || `<b class="gw-mark clean" title="Synchron">${icon("check")}</b>`;
   }
 
   // Header: repository · branch · the one sync action that fits the current state.
@@ -445,40 +452,63 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
       <section class="gw-card"><header><h4>${icon("list-check")} Aktivität dieser Sitzung</h4></header><div class="gw-activity">${activity.filter(a => a.id === p.id).slice(0, 12).map(a => `<div class="${a.error ? "error" : ""}">${icon(a.error ? "circle-exclamation" : "circle-check")}<span>${esc(a.message)}</span><time>${a.time}</time></div>`).join("") || '<p class="gw-card-note">Git-Aktionen und ihre Ergebnisse erscheinen hier.</p>'}</div></section></div></section>`;
   }
 
-  // Overview: every repository of the workspace in one table with its state and the one action that is due.
+  // Overview: every repository as a card with its state, the commit activity of the last 30 days and the one action that is due.
   function overviewView(repositories) {
     const conflicts = p => p.git.files.some(conflict);
     const kind = p => conflicts(p) ? "conflict" : !p.git.remoteName ? "noremote" : !p.git.upstream && p.git.lastCommit ? "publish" : p.git.ahead && p.git.behind ? "diverged" : p.git.behind ? "behind" : p.git.ahead ? "ahead" : "clean";
     const filters = { all: () => true, changed: p => p.git.dirty, ahead: p => p.git.ahead > 0 || kind(p) === "publish", behind: p => p.git.behind > 0, noremote: p => !p.git.remoteName };
-    const rows = repositories.filter(filters[overviewFilter] || filters.all);
-    const tiles = [["all", "Repositories", repositories.length, "neutral"], ["changed", "Mit Änderungen", repositories.filter(filters.changed).length, "warn"], ["ahead", "Ungepusht", repositories.filter(filters.ahead).length, "info"], ["behind", "Hinterher", repositories.filter(filters.behind).length, "danger"], ["noremote", "Ohne Remote", repositories.filter(filters.noremote).length, "neutral"]];
+    const q = state.gitQuery.toLocaleLowerCase();
+    const matches = p => `${p.name} ${p.relativePath} ${p.git?.branch || ""}`.toLocaleLowerCase().includes(q);
+    const rows = repositories.filter(p => matches(p) && (filters[overviewFilter] || filters.all)(p));
+    const filterChips = [["all", "Alle"], ["changed", "Geändert"], ["ahead", "Ungepusht"], ["behind", "Hinterher"], ["noremote", "Ohne Remote"]]
+      .map(([value, label]) => [value, label, repositories.filter(filters[value]).length])
+      .filter(([value, , total]) => value === "all" || total > 0 || value === overviewFilter);
     const pushable = repositories.filter(p => p.git.remoteName && p.git.branch && p.git.lastCommit && (p.git.ahead || !p.git.upstream) && !p.git.behind);
     const latestFetch = repositories.map(p => p.git.lastFetchAt).filter(Boolean).sort().pop();
-    const chip = p => ({ conflict: `<span class="gw-chip tone-danger">${icon("triangle-exclamation")} Konflikt</span>`, noremote: '<span class="gw-chip tone-neutral">kein Remote</span>', publish: '<span class="gw-chip tone-info">unveröffentlicht</span>', diverged: `<span class="gw-chip tone-danger">${icon("arrow-up")}${p.git.ahead} ${icon("arrow-down")}${p.git.behind}</span>`, behind: `<span class="gw-chip tone-warn">${icon("arrow-down")} ${p.git.behind}</span>`, ahead: `<span class="gw-chip tone-info">${icon("arrow-up")} ${p.git.ahead}</span>`, clean: '<span class="gw-chip tone-ok">synchron</span>' })[kind(p)];
+    const withoutGit = overviewFilter === "all" ? state.projects.filter(p => !p.git && matches(p)) : [];
+    const chip = p => ({ conflict: `<span class="gw-chip tone-danger">${icon("triangle-exclamation")} Konflikt</span>`, noremote: '<span class="gw-chip tone-neutral">kein Remote</span>', publish: '<span class="gw-chip tone-info">unveröffentlicht</span>', diverged: `<span class="gw-chip tone-danger">${icon("arrow-up")}${p.git.ahead} ${icon("arrow-down")}${p.git.behind}</span>`, behind: `<span class="gw-chip tone-warn">${icon("arrow-down")} ${p.git.behind} hinterher</span>`, ahead: `<span class="gw-chip tone-info">${icon("arrow-up")} ${p.git.ahead} ungepusht</span>`, clean: '<span class="gw-chip tone-ok">synchron</span>' })[kind(p)];
+    const stateChips = p => `${p.git.dirty ? `<span class="gw-chip tone-warn">${plural(p.git.changedFiles, "Datei", "Dateien")}</span>` : ""}${p.git.dirty && kind(p) === "clean" ? "" : chip(p)}`;
+    const tone = p => { const k = kind(p); return k === "conflict" || k === "diverged" ? "danger" : p.git.dirty ? "warn" : k === "ahead" || k === "publish" ? "info" : k === "behind" ? "warn" : k === "noremote" ? "neutral" : "ok"; };
     const quick = p => {
       const k = kind(p);
       if (k === "conflict" || k === "diverged" || k === "noremote") return button(k === "noremote" ? "Remote …" : "Öffnen", "repository", `data-id="${p.id}"`);
-      if (p.git.dirty) return button(icon("code-commit") + " Committen", "repository", `data-id="${p.id}"`);
+      if (p.git.dirty) return button(icon("code-commit") + " Committen", "repository", `data-id="${p.id}"`, false, "gw-primary");
       if (k === "ahead" || k === "publish") return button(icon("arrow-up") + (k === "publish" ? " Veröffentlichen" : " Push"), "ov-action", `data-id="${p.id}" data-action="push"`, false, "gw-primary");
       if (k === "behind") return button(icon("arrow-down") + " Pull", "ov-action", `data-id="${p.id}" data-action="pull"`);
       return button(icon("arrows-rotate") + " Fetch", "ov-action", `data-id="${p.id}" data-action="fetch"`, !p.git.remoteName, "gw-quiet");
     };
+    // 30 Balken, einer pro Tag; die letzte Woche ist hervorgehoben.
+    const spark = p => {
+      const days = p.git.activity?.length ? p.git.activity : new Array(30).fill(0);
+      const max = Math.max(1, ...days);
+      const bars = days.map((n, i) => { const h = n ? Math.max(5, Math.round(n / max * 30)) : 2; return `<rect x="${i * 10 + 1}" y="${32 - h}" width="7" height="${h}" class="${n ? i >= 23 ? "recent" : "on" : ""}"/>`; }).join("");
+      return `<svg class="gw-spark" viewBox="0 0 300 32" preserveAspectRatio="none" aria-hidden="true">${bars}</svg>`;
+    };
+    const total = p => (p.git.activity || []).reduce((sum, n) => sum + n, 0);
     const stale = p => p.git.lastCommit && Date.now() - new Date(p.git.lastCommit.date).getTime() > 30 * 86400000;
-    return `<header class="gw-header gw-header-overview"><div class="gw-seg gw-seg-static"><span class="gw-seg-icon">${icon("table-cells-large")}</span><span class="gw-seg-copy"><small>Arbeitsbereich</small><strong>Alle Repositories</strong><code>${plural(repositories.length, "Repository", "Repositories")}${latestFetch ? ` · zuletzt geholt ${ago(latestFetch)}` : ""}</code></span></div>
-      <div class="gw-header-tools gw-header-tools-wide">${button(icon(busy?.action === "fetch-all" ? "spinner fa-spin" : "arrows-rotate") + " Alle holen", "fetch-all", 'title="Fetch für jedes Repository mit Remote"', !repositories.some(p => p.git.remoteName))}${button(icon("arrow-up") + ` ${plural(pushable.length, "Repo", "Repos")} pushen`, "push-all", 'title="Alle Repositories mit lokalen Commits pushen"', !pushable.length, "gw-primary")}</div></header>
+    const card = p => `<article class="gw-board-card tone-${tone(p)} ${stale(p) ? "stale" : ""}">
+        <header><span class="gw-board-dot" aria-hidden="true"></span><button type="button" class="gw-board-name" data-gw="repository" data-id="${p.id}" title="${esc(p.name)} öffnen">${esc(p.name)}</button><span class="gw-board-chips">${stateChips(p)}</span></header>
+        <div class="gw-board-meta"><code>${esc(p.relativePath)} · ${esc(p.git.branch || "detached")}</code><small>${plural(total(p), "Commit", "Commits")} in 30 Tagen</small></div>
+        ${spark(p)}
+        <p class="gw-board-commit" title="${esc(p.git.lastCommit?.subject || "")}">${p.git.lastCommit ? esc(p.git.lastCommit.subject) : '<span class="gw-muted">Noch kein Commit</span>'}</p>
+        <footer><span>${p.git.lastCommit ? ago(p.git.lastCommit.date) : ""}</span>${quick(p)}</footer>
+      </article>`;
+    const noGitCard = p => `<article class="gw-board-card gw-board-nogit"><span class="gw-board-nogit-icon">${icon("code-branch")}</span><strong>${esc(p.name)}</strong><small>Noch kein Git-Repository</small>${button("Git anlegen", "init-dialog", `data-id="${p.id}"`)}</article>`;
+    return `<header class="gw-board-head">
+        <div class="gw-board-filters" role="group" aria-label="Repositories filtern">${filterChips.map(([value, label, count]) => button(`${label} <b>${count}</b>`, "ov-filter", `data-value="${value}" aria-pressed="${overviewFilter === value}"`, false, `gw-filter ${overviewFilter === value ? "active" : ""}`)).join("")}</div>
+        <span class="gw-board-fetched">${latestFetch ? `Zuletzt geholt ${ago(latestFetch)}` : ""}</span>
+        ${button(icon(busy?.action === "fetch-all" ? "spinner fa-spin" : "arrows-rotate") + " Alle holen", "fetch-all", 'title="Fetch für jedes Repository mit Remote"', !repositories.some(p => p.git.remoteName))}${pushable.length ? button(icon("arrow-up") + ` ${plural(pushable.length, "Repo", "Repos")} pushen`, "push-all", 'title="Alle Repositories mit lokalen Commits pushen"', false, "gw-primary") : ""}</header>
       ${notice ? `<div class="gw-notice ${notice.error ? "error" : "success"}" role="${notice.error ? "alert" : "status"}">${icon(notice.error ? "circle-exclamation" : "circle-check")}<span>${notice.id ? `<b>${esc(state.projects.find(x => x.id === notice.id)?.name || "")}</b> · ` : ""}${esc(notice.message)}</span>${button(icon("xmark"), "dismiss-notice", 'aria-label="Meldung schließen"', false, "gw-icon-button")}</div>` : ""}
       <div class="gw-view" data-gw-scroll="view"><section class="gw-overview">
-        <div class="gw-kpis">${tiles.map(([value, label, total, tone]) => button(`<small>${label}</small><strong>${total}</strong>`, "ov-filter", `data-value="${value}" aria-pressed="${overviewFilter === value}"`, false, `gw-kpi tone-${tone} ${overviewFilter === value ? "active" : ""}`)).join("")}</div>
-        <div class="gw-table" role="table" aria-label="Repositories"><div class="gw-table-head" role="row"><span>Repository</span><span>Branch</span><span>Änderungen</span><span>Sync</span><span>Letzter Commit</span><span></span></div>
-        ${rows.map(p => `<div class="gw-table-row ${stale(p) ? "stale" : ""}" role="row"><button type="button" class="gw-table-name" data-gw="repository" data-id="${p.id}"><strong>${esc(p.name)}</strong><code>${esc(p.relativePath)}</code></button><span class="gw-mono">${esc(p.git.branch || "detached")}</span><span>${p.git.dirty ? `<span class="gw-chip tone-warn">${plural(p.git.changedFiles, "Datei", "Dateien")}</span>` : '<span class="gw-muted">–</span>'}</span><span>${chip(p)}</span><span class="gw-table-commit">${p.git.lastCommit ? `<span title="${esc(p.git.lastCommit.subject)}">${esc(p.git.lastCommit.subject)}</span><small>${ago(p.git.lastCommit.date)}</small>` : '<span class="gw-muted">Noch kein Commit</span>'}</span><span class="gw-table-action">${quick(p)}</span></div>`).join("") || `<p class="gw-list-empty">Kein Repository passt zu diesem Filter.</p>`}</div>
-        ${state.projects.some(p => !p.git) ? `<p class="gw-overview-foot">${plural(state.projects.filter(p => !p.git).length, "Projekt", "Projekte")} ohne Git. ${button("Git anlegen oder klonen …", "add", "", false, "gw-link")}</p>` : ""}
+        ${rows.length || withoutGit.length ? `<div class="gw-board">${rows.map(card).join("")}${withoutGit.length <= 3 ? withoutGit.map(noGitCard).join("") : ""}</div>` : `<p class="gw-list-empty">${q ? "Kein Repository passt zur Suche." : "Kein Repository passt zu diesem Filter."}</p>`}
+        ${withoutGit.length > 3 ? `<p class="gw-overview-foot">${plural(withoutGit.length, "Projekt", "Projekte")} ohne Git. ${button("Git anlegen oder klonen …", "add", "", false, "gw-link")}</p>` : ""}
       </section></div>`;
   }
 
   function render() {
     if (state.page !== "git") return;
     document.querySelector("#workspace-primary-action").disabled = Boolean(busy);
-    const repositories = state.projects.filter(p => p.git).sort((a, b) => Number(Boolean(b.git.dirty)) - Number(Boolean(a.git.dirty)) || a.name.localeCompare(b.name, "de"));
+    const repositories = state.projects.filter(p => p.git).sort((a, b) => Number(needsAttention(b)) - Number(needsAttention(a)) || a.name.localeCompare(b.name, "de"));
     if (!repositories.some(p => p.id === state.activeGitProjectId)) state.activeGitProjectId = repositories[0]?.id || null;
     const p = selected();
     const s = p ? session(p.id) : null;
@@ -507,7 +537,6 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
       for (const [id, top, left] of scrolls) { const el = document.querySelector(`[data-gw-scroll="${id}"]`); if (el) { el.scrollTop = top; el.scrollLeft = left; } }
       if (focusKey) { const el = document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`); el?.focus({ preventScroll: true }); if (selection && el?.setSelectionRange) { try { el.setSelectionRange(...selection); } catch { /* search fields */ } } }
     }
-    if (focusKey === "gw-repo-search") { const input = rail.querySelector("input"); input?.focus({ preventScroll: true }); if (selection) { try { input.setSelectionRange(...selection); } catch {} } }
     if (p && !data(p.id, "workspace") && !pendingReads.has(key(p.id, "workspace"))) queueMicrotask(() => ensure(p.id));
   }
 
@@ -634,7 +663,6 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
       const project = state.projects.find(p => p.id === target.dataset.id);
       modal("Git-Repository anlegen", `Git im Projekt „${project.name}“ initialisieren. Dateien werden anschließend als neue Änderungen angezeigt.`, "", "Git anlegen", () => run("init", {}, project.id)); return;
     }
-    if (action === "filter") { repoFilter = target.dataset.value; render(); return; }
     if (action === "overview") { view = "overview"; localStorage.setItem("devhub_git_view", view); render(); return; }
     if (action === "ov-filter") { overviewFilter = target.dataset.value; render(); return; }
     if (action === "ov-action") { await run(target.dataset.action, {}, target.dataset.id); return; }
@@ -739,7 +767,6 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
   for (const surface of [root, rail]) surface.addEventListener("input", event => {
     const kind = event.target.dataset.gwInput;
     const p = selected(); if (!kind) return;
-    if (kind === "repoQuery") { state.gitQuery = event.target.value; render(); return; }
     if (kind === "menuQuery") { menuQuery = event.target.value; render(); return; }
     if (!p) return;
     const s = session(p.id);
