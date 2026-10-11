@@ -9,7 +9,7 @@
 // behalten also die Rangfolge der Originale untereinander und gewinnen nur, weil sie später kommen.
 // Eigenschaften mit Kurzschreibweise (border, background, outline) werden als reine Farb-Langform
 // übernommen, damit die Kopie keine Breiten oder Abstände anderer Regeln überschreibt.
-// Design-Tokens (`--name`) werden übersprungen, ihre dunklen Werte stehen von Hand in workbench.css.
+// Design-Tokens (`--name`) werden übersprungen, ihre dunklen Werte stehen von Hand in base.css.
 
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
@@ -277,7 +277,7 @@ export function buildDarkTheme(sources: Array<{ name: string; css: string }>): s
 
 /* ---------- Ausliefern mit Zwischenspeicher ---------- */
 
-export const themeSourceFiles = ["styles.css", "git-workspace.css", "design-system.css", "workbench.css"];
+export const themeSourceFiles = ["base.css", "shell.css", "projects.css", "git.css"];
 let cached: { key: string; css: string } | null = null;
 
 export async function darkThemeStylesheet(publicDirectory: string): Promise<string> {
