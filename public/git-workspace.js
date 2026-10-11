@@ -25,7 +25,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
     if (!sessions.has(id)) {
       let draft = {};
       try { draft = JSON.parse(sessionStorage.getItem(`devhub_git_draft_${id}`) || "{}"); } catch { /* invalid stored draft */ }
-      sessions.set(id, { tab: "changes", file: null, scope: "working", fileQuery: "", branchQuery: "", historyQuery: "", historyAll: false, historyFile: "", commit: null, wrap: false, advanced: false, excluded: new Set(), collapsed: new Set(), ...draft, summary: draft.summary || "", description: draft.description || "", amend: false });
+      sessions.set(id, { tab: "changes", file: null, scope: "working", fileQuery: "", branchQuery: "", historyQuery: "", historyAll: false, historyFile: "", commit: null, wrap: false, advanced: false, excluded: new Set(), collapsed: new Set(), cleanupToggled: new Set(), ...draft, summary: draft.summary || "", description: draft.description || "", amend: false });
     }
     return sessions.get(id);
   };
@@ -431,11 +431,19 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
   function branchView(p, w) {
     const s = session(p.id);
     const branches = (w?.branches || []).filter(b => b.name.toLocaleLowerCase().includes(s.branchQuery.toLocaleLowerCase()));
+    // Aufräumen: gemergte Branches sind vorausgewählt, nicht gemergte mit gelöschtem Remote nur auf Wunsch.
+    const stale = (w?.branches || []).filter(b => b.stale);
+    const picked = stale.filter(b => cleanupChosen(s, b));
+    const cleanup = stale.length ? `<section class="gw-card gw-cleanup"><header><h4>${icon("broom")} Aufräumen</h4><span>${stale.length}</span></header>
+        <p class="gw-card-note">Diese lokalen Branches werden nicht mehr gebraucht. Gemergte lassen sich ohne Verlust löschen.</p>
+        ${stale.map(b => `<label class="gw-cleanup-row"><input type="checkbox" data-gw-input="cleanupBranch" data-branch="${esc(b.name)}" ${cleanupChosen(s, b) ? "checked" : ""} ${busy ? "disabled" : ""}><span class="gw-row-copy"><strong>${esc(b.name)}</strong><small class="${b.mergedInto ? "" : "gw-warn-text"}">${b.mergedInto ? `in ${esc(b.mergedInto)} enthalten` : "Remote-Branch gelöscht, aber nicht gemergt. Seine Commits gehen beim Löschen verloren."}</small></span><small>${formatDate(b.lastCommitDate)}</small></label>`).join("")}
+        <footer>${button(icon("trash-can") + (picked.length ? ` ${plural(picked.length, "Branch", "Branches")} löschen …` : " Nichts ausgewählt"), "cleanup-dialog", "", !picked.length, "gw-danger-soft")}</footer></section>` : "";
     const row = b => `<article class="gw-branch-row"><span class="gw-branch-glyph ${b.current ? "current" : ""}">${icon(b.remote ? "cloud" : "code-branch")}</span><div class="gw-row-copy"><strong>${esc(b.name)} ${b.current ? '<span class="gw-badge">Aktuell</span>' : ""}</strong><small>${b.upstream ? `Verfolgt ${esc(b.upstream)} · ` : ""}${formatDate(b.lastCommitDate)}</small></div><div class="gw-row-actions">${!b.current ? button(b.remote ? "Lokal auschecken" : "Wechseln", b.remote ? "checkout-remote" : "checkout", `data-branch="${esc(b.name)}"`) + button("Vergleichen", "compare", `data-branch="${esc(b.name)}"`) : ""}${!b.current && p.git.branch ? button("Integrieren …", "integrate-dialog", `data-branch="${esc(b.name)}"`, p.git.dirty || !!w?.operation) : ""}${!b.remote ? button(icon("pen"), "rename-branch-dialog", `data-branch="${esc(b.name)}" aria-label="Branch ${esc(b.name)} umbenennen" title="Branch umbenennen"`, false, "gw-icon-button") : ""}${!b.current && !b.remote ? button(icon("trash-can"), "delete-branch-dialog", `data-branch="${esc(b.name)}" aria-label="Branch ${esc(b.name)} löschen" title="Zusammengeführten Branch löschen"`, false, "gw-icon-button gw-danger-link") : ""}</div></article>`;
     return `<section class="gw-management"><header class="gw-section-heading"><div><h3>Branches</h3><p>Arbeitsstände wechseln, vergleichen und zusammenführen. Zum schnellen Wechseln reicht das Branch-Menü im Kopf.</p></div>${button(icon("plus") + " Neuer Branch", "create-branch-dialog", "", false, "gw-primary")}</header><label class="gw-search gw-management-search">${icon("magnifying-glass")}<input type="search" data-gw-input="branchQuery" data-focus-key="gw-branch-search" aria-label="Branches durchsuchen" placeholder="Branch suchen …" value="${esc(s.branchQuery)}"></label>${resourceError(w)}
-      ${s.comparison ? `<section class="gw-card gw-comparison"><header><div><h4>Änderungen aus ${esc(s.comparison)}</h4><p>Vergleich seit dem gemeinsamen Ausgangscommit mit ${esc(p.git.branch || "HEAD")}.</p></div>${button("Schließen", "close-comparison")}</header>${resourceError(data(p.id, `compare:${s.comparison}`))}${data(p.id, `compare:${s.comparison}`)?.patch ? patchView(data(p.id, `compare:${s.comparison}`).patch) : '<p class="gw-card-note">Keine Textänderungen oder Vergleich wird geladen …</p>'}</section>` : ""}
+      ${cleanup}${s.comparison ? `<section class="gw-card gw-comparison"><header><div><h4>Änderungen aus ${esc(s.comparison)}</h4><p>Vergleich seit dem gemeinsamen Ausgangscommit mit ${esc(p.git.branch || "HEAD")}.</p></div>${button("Schließen", "close-comparison")}</header>${resourceError(data(p.id, `compare:${s.comparison}`))}${data(p.id, `compare:${s.comparison}`)?.patch ? patchView(data(p.id, `compare:${s.comparison}`).patch) : '<p class="gw-card-note">Keine Textänderungen oder Vergleich wird geladen …</p>'}</section>` : ""}
       ${[false, true].map(remote => `<section class="gw-card"><header><h4>${remote ? "Remote-Branches" : "Lokale Branches"}</h4><span>${branches.filter(b => !!b.remote === remote).length}</span></header>${branches.filter(b => !!b.remote === remote).map(row).join("") || `<p class="gw-card-note">${remote ? "Keine Remote-Branches. Mit Fetch den aktuellen Stand abrufen." : "Keine passenden lokalen Branches."}</p>`}</section>`).join("")}</section>`;
   }
+  function cleanupChosen(s, b) { return Boolean(b.mergedInto) !== s.cleanupToggled.has(b.name); }
   function stashView(p, w) {
     const s = session(p.id);
     const current = w?.stashes?.find(stash => stash.hash === s.stash);
@@ -491,7 +499,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
         <div class="gw-board-meta"><code>${esc(p.relativePath)} · ${esc(p.git.branch || "detached")}</code><small>${plural(total(p), "Commit", "Commits")} in 30 Tagen</small></div>
         ${spark(p)}
         <p class="gw-board-commit" title="${esc(p.git.lastCommit?.subject || "")}">${p.git.lastCommit ? esc(p.git.lastCommit.subject) : '<span class="gw-muted">Noch kein Commit</span>'}</p>
-        <footer><span>${p.git.lastCommit ? ago(p.git.lastCommit.date) : ""}</span>${quick(p)}</footer>
+        <footer><span>${p.git.lastCommit ? ago(p.git.lastCommit.date) : ""}</span>${p.git.staleBranches?.length ? button(`${icon("broom")} ${plural(p.git.staleBranches.length, "alter Branch", "alte Branches")}`, "cleanup-branches", `data-id="${p.id}" title="Aufräumen: ${esc(p.git.staleBranches.join(", "))}"`, false, "gw-link gw-board-stale") : ""}${quick(p)}</footer>
       </article>`;
     const noGitCard = p => `<article class="gw-board-card gw-board-nogit"><span class="gw-board-nogit-icon">${icon("code-branch")}</span><strong>${esc(p.name)}</strong><small>Noch kein Git-Repository</small>${button("Git anlegen", "init-dialog", `data-id="${p.id}"`)}</article>`;
     return `<header class="gw-board-head">
@@ -672,6 +680,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
       modal("Repositories pushen", `${plural(targets.length, "Repository wird", "Repositories werden")} nacheinander zum Remote übertragen.`, `<ul class="gw-dialog-list">${targets.map(x => `<li><strong>${esc(x.name)}</strong><small>${esc(x.git.branch)} · ${x.git.upstream ? plural(x.git.ahead, "Commit", "Commits") : "veröffentlichen"}</small></li>`).join("")}</ul>`, "Alle pushen", async () => { dialog.close(); await runEach("push", targets.map(x => x.id), "Push"); return true; }); return;
     }
     if (action === "repository") { state.activeGitProjectId = target.dataset.id; view = "repo"; localStorage.setItem("devhub_git_view", view); localStorage.setItem("devhub_git_project", state.activeGitProjectId); render(); ensure(state.activeGitProjectId); return; }
+    if (action === "cleanup-branches") { state.activeGitProjectId = target.dataset.id; session(target.dataset.id).tab = "branches"; view = "repo"; localStorage.setItem("devhub_git_view", view); localStorage.setItem("devhub_git_project", state.activeGitProjectId); render(); ensure(state.activeGitProjectId); return; }
     if (action === "dismiss-notice") { notice = null; render(); return; }
     if (!p) return;
     if (action === "dismiss-guide") { dismissedGuides.add(target.dataset.value); localStorage.setItem("devhub_git_guides", JSON.stringify([...dismissedGuides])); render(); return; }
@@ -720,6 +729,11 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
     }
     if (action === "create-branch-dialog") { confirm("Neuer Branch", `Erstellt einen Branch vom aktuellen Stand (${p.git.branch || "HEAD"}) und wechselt zu ihm.`, "create-branch", {}, "Branch erstellen", false, field("Branch-Name", "branch", s.branchQuery.trim(), 'required placeholder="feature/meine-aenderung" maxlength="100"')); return; }
     if (action === "rename-branch-dialog") { confirm("Branch umbenennen", `Lokalen Branch „${target.dataset.branch}“ umbenennen.`, "rename-branch", { branch: target.dataset.branch }, "Umbenennen", false, field("Neuer Name", "name", target.dataset.branch, 'required maxlength="100"')); return; }
+    if (action === "cleanup-dialog") {
+      const picked = (data(p.id, "workspace")?.branches || []).filter(b => b.stale && cleanupChosen(s, b));
+      const unmerged = picked.filter(b => !b.mergedInto).length;
+      confirm(`${plural(picked.length, "Branch", "Branches")} löschen?`, `${picked.map(b => `„${b.name}“`).join(", ")} lokal löschen. ${unmerged ? `${plural(unmerged, "Branch ist", "Branches sind")} nicht gemergt, ${unmerged === 1 ? "seine" : "ihre"} Commits sind danach nur noch über das Reflog erreichbar.` : "Alle sind bereits gemergt, es geht nichts verloren."}`, "delete-branches", { branches: picked.map(b => b.name) }, "Löschen", true); return;
+    }
     if (action === "delete-branch-dialog") { confirm("Branch löschen?", `„${target.dataset.branch}“ lokal löschen. Git schützt Branches mit noch nicht integrierten Commits.`, "delete-branch", { branch: target.dataset.branch }, "Branch löschen", true); return; }
     if (action === "integrate-dialog") {
       const branch = target.dataset.branch;
@@ -771,6 +785,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
     if (!p) return;
     const s = session(p.id);
     if (kind === "includeFile") { event.target.checked ? s.excluded.delete(event.target.dataset.path) : s.excluded.add(event.target.dataset.path); render(); return; }
+    if (kind === "cleanupBranch") { const name = event.target.dataset.branch; s.cleanupToggled.has(name) ? s.cleanupToggled.delete(name) : s.cleanupToggled.add(name); render(); return; }
     if (kind === "selectAll") { s.excluded = new Set(event.target.checked ? [] : p.git.files.map(f => f.path)); render(); return; }
     if (["summary", "description"].includes(kind)) { s[kind] = event.target.value; saveDraft(p.id); refreshComposer(p); return; }
     if (["amend", "historyAll"].includes(kind)) {

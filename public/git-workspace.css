@@ -352,7 +352,17 @@
 .gw-spark rect.recent { fill: var(--gw-blue); }
 .gw-board-commit { margin: 0; color: var(--gw-ink); font-size: var(--type-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gw-board-card > footer { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--gw-border); color: var(--gw-muted); font-size: var(--type-micro); }
-.gw-board-card > footer .gw-button { margin-left: auto; min-height: 28px; font-size: var(--type-micro); }
+.gw-board-card > footer > span:first-child { margin-right: auto; }
+.gw-board-card > footer .gw-button { min-height: 28px; font-size: var(--type-micro); }
+.gw-board-card > footer .gw-board-stale { padding: 0 6px; color: var(--gw-muted); }
+.gw-board-card > footer .gw-board-stale:hover:not(:disabled) { color: var(--gw-blue); }
+/* Aufräumen im Branches-Tab */
+.gw-cleanup > header h4 { display: flex; align-items: center; gap: 8px; }
+.gw-cleanup-row { display: grid; grid-template-columns: 16px minmax(0,1fr) auto; align-items: center; gap: 12px; padding: 9px 16px; border-top: 1px solid var(--gw-border); cursor: pointer; }
+.gw-cleanup-row input { margin: 0; accent-color: var(--gw-blue); }
+.gw-cleanup-row > small { color: var(--gw-muted); font-size: var(--type-micro); white-space: nowrap; }
+.gw-cleanup-row .gw-warn-text { color: #9a6612; }
+.gw-cleanup > footer { display: flex; justify-content: flex-end; padding: 10px 16px; border-top: 1px solid var(--gw-border); }
 .gw-board-card.stale { background: var(--gw-surface-2); }
 .gw-board-card.stale .gw-board-name,.gw-board-card.stale .gw-board-commit { color: var(--gw-muted); }
 .gw-board-nogit { align-items: center; justify-content: center; gap: 6px; min-height: 190px; text-align: center; border-style: dashed; background: transparent; color: var(--gw-muted); }

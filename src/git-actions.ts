@@ -4,13 +4,14 @@ import { access, appendFile, lstat, mkdtemp, readFile, rm, writeFile } from "nod
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { promisify } from "node:util";
+import { cleanupCandidates, readLocalBranchStates } from "./git-branches.js";
 import { moveToTrash, trashSupport } from "./platform.js";
 import { mapLimit } from "./scanner.js";
 import type { ProjectDefinition } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
-export const advancedGitActions = ["suggest-files", "commit-files", "amend-files", "ignore", "amend", "rename-branch", "delete-branch", "checkout-remote", "merge", "rebase", "continue", "abort", "stash-save", "stash-apply", "stash-pop", "stash-drop", "create-tag", "delete-tag", "push-tag", "remote-add", "remote-remove", "remote-set-url", "identity", "revert", "cherry-pick", "stage-hunk", "unstage-hunk", "resolve-file"] as const;
+export const advancedGitActions = ["suggest-files", "commit-files", "amend-files", "ignore", "amend", "rename-branch", "delete-branch", "delete-branches", "checkout-remote", "merge", "rebase", "continue", "abort", "stash-save", "stash-apply", "stash-pop", "stash-drop", "create-tag", "delete-tag", "push-tag", "remote-add", "remote-remove", "remote-set-url", "identity", "revert", "cherry-pick", "stage-hunk", "unstage-hunk", "resolve-file"] as const;
 export type GitAction = typeof advancedGitActions[number] | "refresh" | "stage" | "unstage" | "stage-files" | "unstage-files" | "discard-files" | "stage-all" | "unstage-all" | "commit" | "fetch" | "pull" | "push" | "checkout" | "create-branch" | "undo-commit";
 
 export interface GitActionPayload {
@@ -32,6 +33,7 @@ export interface GitActionPayload {
   method?: unknown;
   side?: unknown;
   repo?: unknown;
+  branches?: unknown;
 }
 
 export interface GitBranchInfo {
@@ -40,6 +42,12 @@ export interface GitBranchInfo {
   remote?: boolean;
   upstream: string | null;
   lastCommitDate: string | null;
+  /** Nur lokale Branches: Name des Standard-Branches, in dem dieser Branch enthalten ist. */
+  mergedInto?: string | null;
+  /** Nur lokale Branches: der verfolgte Remote-Branch wurde gelöscht. */
+  gone?: boolean;
+  /** Nur lokale Branches: kann aufgeräumt werden. */
+  stale?: boolean;
 }
 
 export interface GitDiffSection {
@@ -169,9 +177,16 @@ export async function readGitBranches(project: ProjectDefinition): Promise<GitBr
     "for-each-ref", "refs/heads", "refs/remotes", "--sort=-committerdate",
     "--format=%(refname)%1f%(HEAD)%1f%(upstream:short)%1f%(committerdate:iso-strict)"
   ]);
+  const { base, branches: states } = await readLocalBranchStates(repository);
+  const stale = new Set(cleanupCandidates(base, states).map((branch) => branch.name));
   return output.split(/\r?\n/).filter(Boolean).flatMap((line) => {
     const [name, head, upstream, date] = line.split("\x1f");
-    return name && !name.endsWith("/HEAD") ? [{ name: name.replace(/^refs\/(heads|remotes)\//, ""), remote: name.startsWith("refs/remotes/"), current: head === "*", upstream: upstream || null, lastCommitDate: date || null }] : [];
+    if (!name || name.endsWith("/HEAD")) return [];
+    const short = name.replace(/^refs\/(heads|remotes)\//, "");
+    const remote = name.startsWith("refs/remotes/");
+    const state = remote ? null : states.find((branch) => branch.name === short);
+    return [{ name: short, remote, current: head === "*", upstream: upstream || null, lastCommitDate: date || null,
+      ...(state ? { mergedInto: state.merged ? base : null, gone: state.gone, stale: stale.has(short) } : {}) }];
   });
 }
 
@@ -689,6 +704,18 @@ async function runAdvancedGitAction(project: ProjectDefinition, action: GitActio
     if (branch.current || branch.remote) throw new Error("Nur inaktive lokale Branches können gelöscht werden.");
     await git(repository, ["branch", "-d", branch.name]);
     return `Branch „${branch.name}“ gelöscht.`;
+  }
+  // Räumt alte Branches auf. Gemergte löscht git branch -d ohne Verlust; ein nicht gemergter Branch mit
+  // gelöschtem Remote braucht -D. Die Oberfläche wählt solche Branches nur auf ausdrücklichen Wunsch aus.
+  if (action === "delete-branches") {
+    const requested = Array.isArray(payload.branches) ? payload.branches.map((value) => requestedBranchName(value)) : [];
+    if (!requested.length) throw new Error("Wähle mindestens einen Branch aus.");
+    const { base, branches } = await readLocalBranchStates(repository);
+    const candidates = new Map(cleanupCandidates(base, branches).map((branch) => [branch.name, branch]));
+    const unknown = requested.filter((name) => !candidates.has(name));
+    if (unknown.length) throw new Error(`„${unknown[0]}“ kann nicht aufgeräumt werden. Bitte aktualisieren.`);
+    for (const name of requested) await git(repository, ["branch", candidates.get(name)!.merged ? "-d" : "-D", name]);
+    return requested.length === 1 ? `Branch „${requested[0]}“ gelöscht.` : `${requested.length} Branches gelöscht.`;
   }
   if (action === "checkout-remote") {
     const branch = await knownBranch(project, payload.branch);

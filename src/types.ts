@@ -79,6 +79,8 @@ export interface GitInfo {
   filesTruncated: boolean;
   /** Commits pro Tag der letzten 30 Tage, ältester Tag zuerst, heute zuletzt. */
   activity: number[];
+  /** Lokale Branches, die bereits im Standard-Branch enthalten sind oder deren Remote-Branch gelöscht wurde. */
+  staleBranches: string[];
   lastCommit: {
     hash: string;
     subject: string;
