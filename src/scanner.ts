@@ -6,7 +6,8 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { isWindows } from "./platform.js";
 import { resolveStack } from "./stack-registry.js";
-import type { AppConfig, GitInfo, LauncherDefinition, LauncherKind, ProjectDefinition, StackWebInfo } from "./types.js";
+import { composerDependencyCheck, composerNeedsInstall, installCommand, nodeDependencyCheck } from "./dependencies.js";
+import type { AppConfig, DependencyManager, GitInfo, InstallerDefinition, LauncherDefinition, LauncherKind, ProjectDefinition, StackWebInfo } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 const packageScriptPattern = /^(dev|start|serve|preview)(:|$)/i;
@@ -774,6 +775,36 @@ async function scanProject(discovered: DiscoveredProject, config: AppConfig, own
     });
   }
 
+  // Abhängigkeiten: ein Eintrag pro Installationsordner, nur wenn etwas fehlt oder veraltet ist.
+  const installers = new Map<string, InstallerDefinition>();
+  const addInstaller = (installRoot: string, manager: DependencyManager, state: InstallerDefinition["state"]) => {
+    const relativeCwd = toPosix(path.relative(projectPath, installRoot)) || ".";
+    const id = stableId(`${projectId}:${relativeCwd}:install:${manager}`);
+    if (installers.has(id)) return;
+    const command = installCommand(manager);
+    installers.set(id, {
+      id, projectId, name: relativeCwd === "." ? command.display : `${path.basename(installRoot)} · ${command.display}`,
+      kind: "install", relativeCwd, command: command.display, cwd: installRoot, executable: command.executable, args: command.args,
+      dynamicPort: false, preferred: false, port: null, parentId: null, parts: [], manager, state
+    });
+  };
+  if (!isOwnApp) {
+    for (const [index, packagePath] of evidence.packagePaths.entries()) {
+      const packageJson = packages[index];
+      if (!packageJson || !Object.keys({ ...packageJson.dependencies, ...packageJson.devDependencies }).length) continue;
+      const directory = path.dirname(packagePath);
+      const manager = await detectPackageManager(directory, projectPath, packageJson.packageManager);
+      const check = await nodeDependencyCheck(directory, projectPath, manager);
+      if (check) addInstaller(check.installRoot, manager, check.state);
+    }
+    for (const [index, composerPath] of evidence.composerPaths.entries()) {
+      const composer = composers[index];
+      if (!composer || !composerNeedsInstall(composer.require, composer["require-dev"])) continue;
+      const check = await composerDependencyCheck(path.dirname(composerPath));
+      if (check) addInstaller(check.installRoot, "composer", check.state);
+    }
+  }
+
   const uniqueLaunchers = Array.from(new Map(launchers.map((launcher) => [launcher.id, launcher])).values())
     .sort((a, b) => Number(b.preferred) - Number(a.preferred) || a.name.localeCompare(b.name, "de"));
   return {
@@ -794,6 +825,7 @@ async function scanProject(discovered: DiscoveredProject, config: AppConfig, own
     git: await readGitInfo(evidence.gitRoot, projectPath),
     fileCount: evidence.fileCount,
     launchers: isOwnApp ? [] : uniqueLaunchers,
+    installers: [...installers.values()],
     isSelf: isOwnApp,
     descriptionAuto: !writtenDescription
   };

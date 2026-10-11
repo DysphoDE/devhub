@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, getAppDirectory, saveScanRoot } from "./config.js";
 import { advancedGitActions, fetchAllRepositories, readGitWorkspace, readGitStash, readGitStats, readGitComparison, initializeGitRepository, cloneGitRepository, cloneGitHubRepository, listGitHubRepositories, readGitBranches, readGitCommit, readGitDiff, readGitHistory, runGitAction, suggestGitCommitMessage, type GitAction, type GitActionPayload } from "./git-actions.js";
+import { markInstalled } from "./dependencies.js";
 import { ProcessManager } from "./process-manager.js";
 import { readGitInfo, scanWorkspace } from "./scanner.js";
 import { isStackAction } from "./stack.js";
@@ -75,6 +76,10 @@ function publicProject(project: ProjectDefinition): PublicProject {
     launchers: project.launchers.map(({ cwd: _cwd, executable: _executable, args: _args, ...launcher }) => ({
       ...launcher,
       runtime: processManager.getSnapshot(launcher.id)
+    })),
+    installers: project.installers.map(({ cwd: _cwd, executable: _executable, args: _args, ...installer }) => ({
+      ...installer,
+      runtime: processManager.getSnapshot(installer.id)
     }))
   };
 }
@@ -85,8 +90,16 @@ function publicProjects(): PublicProject[] {
 
 function findLauncher(id: string) {
   for (const project of projects) {
-    const launcher = project.launchers.find((candidate) => candidate.id === id);
+    const launcher = project.launchers.find((candidate) => candidate.id === id) ?? project.installers.find((candidate) => candidate.id === id);
     if (launcher) return launcher;
+  }
+  return null;
+}
+
+function findInstaller(id: string) {
+  for (const project of projects) {
+    const installer = project.installers.find((candidate) => candidate.id === id);
+    if (installer) return installer;
   }
   return null;
 }
@@ -96,7 +109,12 @@ function broadcast(type: string, payload: unknown): void {
   for (const client of eventClients) client.write(message);
 }
 
-processManager.onChange((launcherId, runtime) => broadcast("runtime", { launcherId, runtime }));
+processManager.onChange((launcherId, runtime) => {
+  broadcast("runtime", { launcherId, runtime });
+  // Nach einer erfolgreichen Installation gilt der Ordner als frisch installiert, der Hinweis verschwindet beim Neueinlesen.
+  const installer = runtime.status === "stopped" && runtime.exitCode === 0 ? findInstaller(launcherId) : null;
+  if (installer) void markInstalled(installer.cwd, installer.manager).then(() => refreshProjects()).catch(() => undefined);
+});
 processManager.onLog((launcherId, entry) => broadcast("log", { launcherId, entry }));
 
 let lastProjectsPayload = "";

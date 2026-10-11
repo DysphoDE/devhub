@@ -1,4 +1,5 @@
-export type LauncherKind = "package-script" | "batch" | "command" | "powershell" | "shell" | "static-server" | "php-server";
+export type LauncherKind = "package-script" | "batch" | "command" | "powershell" | "shell" | "static-server" | "php-server" | "install";
+export type DependencyManager = "npm" | "pnpm" | "yarn" | "bun" | "composer";
 export type RuntimeStatus = "stopped" | "starting" | "running" | "stopping" | "error";
 export type AutostartMode = "dev" | "production";
 export type StackProvider = "laragon" | "herd" | "valet" | "none";
@@ -40,6 +41,13 @@ export interface LauncherDefinition {
   parentId: string | null;
   /** Teilskripte, die dieser Starter gemeinsam startet. Leer bei einfachen Startern. */
   parts: LauncherPart[];
+}
+
+/** Installiert fehlende oder veraltete Abhängigkeiten (npm install, composer install …). */
+export interface InstallerDefinition extends LauncherDefinition {
+  manager: DependencyManager;
+  /** missing: node_modules bzw. vendor fehlt; outdated: das Lockfile ist neuer als die Installation. */
+  state: "missing" | "outdated";
 }
 
 export interface LauncherPart {
@@ -96,6 +104,8 @@ export interface ProjectDefinition {
   git: GitInfo | null;
   fileCount: number;
   launchers: LauncherDefinition[];
+  /** Nur Ordner, deren Abhängigkeiten fehlen oder veraltet sind. */
+  installers: InstallerDefinition[];
   /** true für die DevHub-Installation, die gerade läuft. Sie bietet sich nicht selbst zum Starten an. */
   isSelf: boolean;
   /** true, wenn die Beschreibung nur aus erkannten Technologien abgeleitet ist. */
@@ -122,9 +132,14 @@ export interface PublicLauncher extends Omit<LauncherDefinition, "cwd" | "execut
   runtime: RuntimeSnapshot;
 }
 
-export interface PublicProject extends Omit<ProjectDefinition, "absolutePath" | "thumbnailPath" | "webRoot" | "launchers"> {
+export interface PublicInstaller extends Omit<InstallerDefinition, "cwd" | "executable" | "args"> {
+  runtime: RuntimeSnapshot;
+}
+
+export interface PublicProject extends Omit<ProjectDefinition, "absolutePath" | "thumbnailPath" | "webRoot" | "launchers" | "installers"> {
   thumbnailUrl: string | null;
   launchers: PublicLauncher[];
+  installers: PublicInstaller[];
 }
 
 export interface SystemCapabilities {

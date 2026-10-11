@@ -116,6 +116,24 @@ function topLaunchers(project) {
   return project.launchers.filter((launcher) => !launcher.parentId);
 }
 
+// Installationen (npm install, composer install …) für Ordner, deren Abhängigkeiten fehlen oder veraltet sind.
+const busyStatuses = ["starting", "running", "stopping"];
+function activeInstaller(project) {
+  return project.installers?.find((installer) => busyStatuses.includes(installer.runtime.status)) || null;
+}
+// Eine fehlende Installation wird nur zur Hauptaktion, wenn sie den Ordner des bevorzugten Starters betrifft.
+// Ein Nebenordner wie design/promo-film ohne node_modules verdrängt "Starten" also nicht.
+function blockingInstaller(project) {
+  const preferred = topLaunchers(project).find((launcher) => launcher.preferred) || topLaunchers(project)[0];
+  const covers = (installer, cwd) => installer.relativeCwd === "." || cwd === installer.relativeCwd || cwd.startsWith(`${installer.relativeCwd}/`);
+  return project.installers?.find((installer) => installer.state === "missing" && (preferred ? covers(installer, preferred.relativeCwd) : installer.relativeCwd === ".")) || null;
+}
+const lockfileNames = { npm: "package-lock.json", pnpm: "pnpm-lock.yaml", yarn: "yarn.lock", bun: "bun.lock", composer: "composer.lock" };
+function installerReason(installer) {
+  if (installer.state === "outdated") return `${lockfileNames[installer.manager] || "Lockfile"} ist neuer als die Installation`;
+  return `${installer.manager === "composer" ? "vendor" : "node_modules"} fehlt${installer.relativeCwd === "." ? "" : ` in ${installer.relativeCwd}`}`;
+}
+
 function preferredLauncher(project) {
   const top = topLaunchers(project);
   return activeLauncher(project) || top.find((launcher) => launcher.preferred) || top[0] || null;
@@ -167,7 +185,7 @@ function projectState(project) {
 
 function findLauncher(id) {
   for (const project of state.projects) {
-    const launcher = project.launchers.find((item) => item.id === id);
+    const launcher = project.launchers.find((item) => item.id === id) || project.installers?.find((item) => item.id === id);
     if (launcher) return { project, launcher };
   }
   return null;
@@ -353,6 +371,11 @@ function rowAction(project) {
     const url = launcher.runtime.url;
     return `${url ? `<a class="wb-btn run" href="${escapeHtml(url)}" data-open-id="${project.id}" target="_blank" rel="noopener noreferrer"><i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>Öffnen</a>` : ""}<button type="button" class="wb-btn ${url ? "icon" : ""}" data-launcher-action="stop" data-id="${launcher.id}" aria-label="${escapeHtml(launcher.name)} stoppen" title="${escapeHtml(launcher.name)} stoppen"><i class="fa-solid fa-stop" aria-hidden="true"></i>${url ? "" : "Stoppen"}</button>`;
   }
+  const installing = activeInstaller(project);
+  if (installing) return `<button type="button" class="wb-btn" disabled><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>${escapeHtml(installing.command)} …</button>`;
+  // Ohne Abhängigkeiten scheitert jeder Starter und meist auch die Adresse, die Installation ist dann der nächste Schritt.
+  const missing = blockingInstaller(project);
+  if (missing) return `<button type="button" class="wb-btn primary" data-launcher-action="start" data-id="${missing.id}" title="Abhängigkeiten fehlen · ${escapeHtml(installerReason(missing))}"><i class="fa-solid fa-download" aria-hidden="true"></i>${escapeHtml(missing.command)}</button>`;
   const preferred = preferredLauncher(project);
   // Liefert der lokale Webserver das Projekt aus, ist die Adresse der Hauptweg. Ein Starter (etwa Vite für Assets) rückt daneben.
   if (project.defaultUrl && webOnline()) {
@@ -366,12 +389,16 @@ function rowAction(project) {
 // Gemeinsame Bausteine für Listenzeile und Kachel, damit beide Ansichten dasselbe zeigen und dieselbe Hauptaktion haben.
 function projectBits(project) {
   const launcher = activeLauncher(project);
-  const failed = project.launchers.find((item) => item.runtime.status === "error");
-  const status = project.isSelf ? "self" : launcher?.runtime.status === "running" ? "run" : launcher ? "busy" : failed ? "error" : "";
+  const installing = activeInstaller(project);
+  const failed = [...project.launchers, ...(project.installers || [])].find((item) => item.runtime.status === "error");
+  const outdated = project.installers?.find((item) => item.state === "outdated");
+  const status = project.isSelf ? "self" : launcher?.runtime.status === "running" ? "run" : launcher || installing ? "busy" : failed ? "error" : "";
   const statusTitle = { self: "DevHub selbst", run: "läuft", busy: "wird gestartet oder gestoppt", error: "Starter abgebrochen" }[status] || "bereit";
   const live = project.isSelf ? `<span class="wb-live">diese Instanz · ${escapeHtml(location.host)}</span>`
     : launcher ? `<span class="wb-live">${escapeHtml(launcher.name)}${launcher.runtime.url ? ` · ${escapeHtml(displayUrl(launcher.runtime.url))}` : ` · ${statusLabels[launcher.runtime.status]}`}</span>`
-    : failed ? `<span class="wb-live error">${escapeHtml(failed.name)} · abgebrochen</span>` : "";
+    : installing ? `<span class="wb-live">${escapeHtml(installing.command)} läuft …</span>`
+    : failed ? `<span class="wb-live error">${escapeHtml(failed.name)} · abgebrochen</span>`
+    : outdated ? `<span class="wb-live warn" title="${escapeHtml(installerReason(outdated))}">Abhängigkeiten veraltet</span>` : "";
   const git = project.git ? gitStatusPresentation(project.git) : null;
   const gitHtml = `<span class="wb-git">${git ? `<i class="fa-solid fa-code-branch" aria-hidden="true"></i><code>${escapeHtml(project.git.branch || "detached")}</code><span class="wb-git-state ${git.kind}" title="${escapeHtml(git.title)}">${escapeHtml(git.label)}</span>` : '<span class="wb-quiet">kein Git</span>'}</span>`;
   const last = project.git?.lastCommit;
@@ -426,7 +453,7 @@ function schedulePanelRender() {
 async function loadMissingLogTails() {
   const project = state.projects.find((item) => item.id === state.selectedProjectId);
   if (!project) return;
-  for (const launcher of project.launchers.filter((item) => item.runtime.status !== "stopped" && !state.logTails.has(item.id))) {
+  for (const launcher of [...project.launchers, ...(project.installers || [])].filter((item) => item.runtime.status !== "stopped" && !state.logTails.has(item.id))) {
     state.logTails.set(launcher.id, []);
     try {
       const data = await api(`/api/launchers/${launcher.id}/logs`);
@@ -484,7 +511,9 @@ function projectPanelHtml(project) {
     blocks.push(panelBlock("Im Browser", `<div class="wb-addr-row">${open}<button type="button" class="wb-btn icon ghost" data-copy-value="${escapeHtml(project.defaultUrl)}" data-copy-label="Adresse kopiert." aria-label="Adresse kopieren" title="Adresse kopieren"><i class="fa-regular fa-copy" aria-hidden="true"></i></button></div>${note}`));
   }
   if (project.isSelf) blocks.push(panelBlock("Läuft", `<div class="wb-runbox running"><div class="wb-runbox-head"><span class="wb-status self"></span><strong>Diese DevHub-Instanz</strong><small>${escapeHtml(location.host)}</small></div><p class="wb-hint">DevHub bietet sich nicht selbst zum Starten an, weil es bereits läuft.</p></div>`));
-  for (const launcher of project.launchers.filter((item) => item.runtime.status !== "stopped")) blocks.push(panelBlock(launcher.runtime.status === "error" ? "Abgebrochen" : "Läuft", runBox(launcher)));
+  for (const launcher of [...(project.installers || []), ...project.launchers].filter((item) => item.runtime.status !== "stopped")) blocks.push(panelBlock(launcher.runtime.status === "error" ? "Abgebrochen" : "Läuft", runBox(launcher)));
+  const idleInstallers = (project.installers || []).filter((item) => item.runtime.status === "stopped");
+  if (idleInstallers.length) blocks.push(panelBlock("Abhängigkeiten", idleInstallers.map((installer) => `<div class="wb-starter"><div><strong>${escapeHtml(installer.name)}</strong><code>${escapeHtml(installerReason(installer))}</code></div><div class="wb-starter-act"><button type="button" class="wb-btn ${installer.state === "missing" ? "primary" : ""}" data-launcher-action="start" data-id="${installer.id}" title="${escapeHtml(installer.command)} in ${escapeHtml(installer.relativeCwd)} ausführen"><i class="fa-solid fa-download" aria-hidden="true"></i>Installieren</button></div></div>`).join("")));
   const top = topLaunchers(project);
   const preferred = preferredLauncher(project);
   if (top.length) {
@@ -1053,7 +1082,12 @@ async function runLauncher(id, action) {
 function updateRuntime(launcherId, runtime) {
   const found = findLauncher(launcherId);
   if (!found) return;
+  const wasBusy = busyStatuses.includes(found.launcher.runtime.status);
   found.launcher.runtime = runtime;
+  if (found.launcher.kind === "install" && wasBusy) {
+    if (runtime.status === "stopped") toast(`${found.launcher.command} für ${found.project.name} abgeschlossen.`);
+    if (runtime.status === "error") toast(`${found.launcher.command} für ${found.project.name} ist fehlgeschlagen. Details stehen im Log.`, "error");
+  }
   render();
   if (state.activeLogId === launcherId) updateLogState(runtime);
 }
@@ -1279,6 +1313,7 @@ function paletteItems() {
       const single = topLaunchers(project).length === 1;
       items.push({ ...base, icon: running ? "stop" : "play", label: `${project.name}${single ? "" : ` · ${launcher.name}`} ${running ? "stoppen" : "starten"}`, hint: launcher.command, keywords: `${keywords} ${launcher.name}`, run: () => runLauncher(launcher.id, running ? "stop" : "start") });
     }
+    for (const installer of project.installers || []) items.push({ ...base, icon: "download", label: `${project.name}: ${installer.command}`, hint: installerReason(installer), keywords: `${keywords} installieren abhängigkeiten ${installer.manager}`, run: () => runLauncher(installer.id, "start"), rank: base.rank + 1 });
     if (url) items.push({ ...base, icon: "arrow-up-right-from-square", label: `${project.name} im Browser öffnen`, hint: url.replace(/^https?:\/\//, "").replace(/\/$/, ""), run: openBrowser });
     if (openEditor) items.push({ ...base, icon: "code", label: `${project.name} in ${editorName} öffnen`, hint: "", run: openEditor });
     if (state.capabilities?.terminal.available) items.push({ ...base, icon: "terminal", label: `${project.name} im Terminal öffnen`, hint: "", run: () => runProjectAction(project.id, "terminal") });

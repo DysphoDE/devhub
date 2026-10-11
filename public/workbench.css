@@ -160,6 +160,7 @@ body.wb-compact .wb-commit-line { display: none; }
 .wb-row-name small { display: flex; flex-wrap: wrap; gap: 2px 10px; color: var(--muted); font: var(--type-micro)/1.4 var(--mono); }
 .wb-row-name .wb-live { color: var(--wb-runtime-ink); }
 .wb-row-name .wb-live.error { color: var(--wb-danger-ink); }
+.wb-row-name .wb-live.warn { color: var(--wb-warning-ink); }
 .wb-fav { color: #d9a12a; font-size: 10px; vertical-align: 1px; }
 .wb-status { width: 9px; height: 9px; justify-self: center; border: 1.5px solid var(--quiet); border-radius: 50%; }
 .wb-status.run { border: 0; background: var(--runtime); box-shadow: 0 0 0 4px var(--runtime-soft); animation: wb-pulse 2.4s ease-in-out infinite; }
@@ -349,6 +350,7 @@ body.wb-compact .wb-row-name small:has(.wb-domain) { display: flex; }
 .wb-tile-sub { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; margin: -4px 0 0; color: var(--muted); font: var(--type-micro)/1.45 var(--mono); overflow-wrap: anywhere; }
 .wb-tile-sub .wb-live { color: var(--wb-runtime-ink); }
 .wb-tile-sub .wb-live.error { color: var(--wb-danger-ink); }
+.wb-tile-sub .wb-live.warn { color: var(--wb-warning-ink); }
 .wb-tile-foot { display: flex; flex-direction: column; gap: 10px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); }
 .wb-tile-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
 .wb-tile-act { display: flex; align-items: center; gap: 6px; }
