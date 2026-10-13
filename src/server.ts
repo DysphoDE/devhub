@@ -8,6 +8,7 @@ import { loadConfig, getAppDirectory, saveScanRoot } from "./config.js";
 import { advancedGitActions, fetchAllRepositories, readGitWorkspace, readGitStash, readGitStats, readGitComparison, initializeGitRepository, cloneGitRepository, cloneGitHubRepository, listGitHubRepositories, readGitBranches, readGitCommit, readGitDiff, readGitHistory, runGitAction, suggestGitCommitMessage, type GitAction, type GitActionPayload } from "./git-actions.js";
 import { markInstalled } from "./dependencies.js";
 import { ProcessManager } from "./process-manager.js";
+import { RunHistory, runFromSnapshot } from "./run-history.js";
 import { githubCliReady, githubRepository, readGitHubStatus } from "./github-status.js";
 import { mapLimit, readGitInfo, scanWorkspace } from "./scanner.js";
 import { isStackAction } from "./stack.js";
@@ -21,6 +22,8 @@ const publicDirectory = path.resolve(sourceDirectory, "../public");
 const fontAwesomeDirectory = path.resolve(sourceDirectory, "../node_modules/@fortawesome/fontawesome-free");
 const config = await loadConfig();
 const processManager = new ProcessManager();
+const runHistory = new RunHistory(path.join(getAppDirectory(), ".devhub", "runs.json"));
+await runHistory.load();
 const capabilities = await getSystemCapabilities(config);
 const publicUrl = config.publicUrl ?? `http://${config.publicHost}:${config.port}`;
 
@@ -81,6 +84,11 @@ function publicProject(project: ProjectDefinition): PublicProject {
     installers: project.installers.map(({ cwd: _cwd, executable: _executable, args: _args, ...installer }) => ({
       ...installer,
       runtime: processManager.getSnapshot(installer.id)
+    })),
+    tasks: project.tasks.map(({ cwd: _cwd, executable: _executable, args: _args, ...task }) => ({
+      ...task,
+      runtime: processManager.getSnapshot(task.id),
+      lastRun: runHistory.get(task.id)
     }))
   };
 }
@@ -91,7 +99,9 @@ function publicProjects(): PublicProject[] {
 
 function findLauncher(id: string) {
   for (const project of projects) {
-    const launcher = project.launchers.find((candidate) => candidate.id === id) ?? project.installers.find((candidate) => candidate.id === id);
+    const launcher = project.launchers.find((candidate) => candidate.id === id)
+      ?? project.installers.find((candidate) => candidate.id === id)
+      ?? project.tasks.find((candidate) => candidate.id === id);
     if (launcher) return launcher;
   }
   return null;
@@ -115,6 +125,8 @@ processManager.onChange((launcherId, runtime) => {
   // Nach einer erfolgreichen Installation gilt der Ordner als frisch installiert, der Hinweis verschwindet beim Neueinlesen.
   const installer = runtime.status === "stopped" && runtime.exitCode === 0 ? findInstaller(launcherId) : null;
   if (installer) void markInstalled(installer.cwd, installer.manager).then(() => refreshProjects()).catch(() => undefined);
+  const run = runFromSnapshot(runtime);
+  if (run && projects.some((project) => project.tasks.some((task) => task.id === launcherId))) runHistory.record(launcherId, run);
 });
 processManager.onLog((launcherId, entry) => broadcast("log", { launcherId, entry }));
 
@@ -659,6 +671,7 @@ async function shutdown(): Promise<void> {
   workspaceWatcher?.close();
   if (watchDebounce) clearTimeout(watchDebounce);
   await processManager.stopAll();
+  await runHistory.flush();
   // Offene Event-Streams würden server.close() sonst bis zum Timeout blockieren.
   for (const client of eventClients) client.end();
   eventClients.clear();

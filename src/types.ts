@@ -50,6 +50,15 @@ export interface InstallerDefinition extends LauncherDefinition {
   state: "missing" | "outdated";
 }
 
+/** Ergebnis des letzten abgeschlossenen Laufs einer Aufgabe wie `npm run build`. */
+export interface TaskRun {
+  startedAt: string | null;
+  finishedAt: string;
+  exitCode: number | null;
+  /** cancelled: über DevHub abgebrochen. */
+  outcome: "success" | "failed" | "cancelled";
+}
+
 export interface LauncherPart {
   script: string;
   launcherId: string | null;
@@ -108,6 +117,8 @@ export interface ProjectDefinition {
   launchers: LauncherDefinition[];
   /** Nur Ordner, deren Abhängigkeiten fehlen oder veraltet sind. */
   installers: InstallerDefinition[];
+  /** Package-Skripte, die einmal laufen und sich beenden: build, test, lint … */
+  tasks: LauncherDefinition[];
   /** true für die DevHub-Installation, die gerade läuft. Sie bietet sich nicht selbst zum Starten an. */
   isSelf: boolean;
   /** true, wenn die Beschreibung nur aus erkannten Technologien abgeleitet ist. */
@@ -138,10 +149,15 @@ export interface PublicInstaller extends Omit<InstallerDefinition, "cwd" | "exec
   runtime: RuntimeSnapshot;
 }
 
-export interface PublicProject extends Omit<ProjectDefinition, "absolutePath" | "thumbnailPath" | "webRoot" | "launchers" | "installers"> {
+export interface PublicTask extends PublicLauncher {
+  lastRun: TaskRun | null;
+}
+
+export interface PublicProject extends Omit<ProjectDefinition, "absolutePath" | "thumbnailPath" | "webRoot" | "launchers" | "installers" | "tasks"> {
   thumbnailUrl: string | null;
   launchers: PublicLauncher[];
   installers: PublicInstaller[];
+  tasks: PublicTask[];
 }
 
 export interface SystemCapabilities {

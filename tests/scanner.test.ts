@@ -364,3 +364,31 @@ test("counts commits per local day for the last 30 days", () => {
   assert.equal(days[0], 1);
   assert.equal(days.reduce((sum, n) => sum + n, 0), 4);
 });
+
+test("führt übrige Package-Skripte als Aufgaben, ohne Lifecycle-Hooks und mitgestartete Teile", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "devhub-tasks-"));
+  try {
+    const project = path.join(root, "Kundenportal");
+    await mkdir(project, { recursive: true });
+    await writeFile(path.join(project, "package.json"), JSON.stringify({
+      scripts: {
+        dev: "concurrently npm:queue \"vite\"",
+        queue: "php artisan queue:listen",
+        build: "vite build",
+        "build:ssr": "vite build --ssr",
+        prebuild: "rimraf dist",
+        prepare: "husky",
+        postinstall: "patch-package",
+        postcss: "postcss src -o dist",
+        test: "vitest run",
+        preview: "vite preview"
+      }
+    }));
+    const projects = await scanWorkspace(testConfig(root), path.join(root, "devhub-node"));
+    assert.deepEqual(projects[0].launchers.map((launcher) => launcher.name), ["dev", "preview"]);
+    assert.deepEqual(projects[0].tasks.map((task) => task.command), ["npm run build", "npm run build:ssr", "npm run postcss", "npm run test"]);
+    assert.ok(projects[0].tasks.every((task) => task.kind === "package-script" && !task.preferred));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

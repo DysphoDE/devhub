@@ -339,12 +339,19 @@ export function composedScripts(command: string, available: string[], self: stri
   return resolved;
 }
 
-async function packageLaunchers(packagePath: string, projectId: string, projectPath: string): Promise<LauncherDefinition[]> {
+// Skripte, die npm selbst bei install, publish & Co. aufruft. Von Hand gestartet ergeben sie keinen Sinn.
+const lifecycleScripts = new Set(["install", "uninstall", "prepare", "prepublish", "prepublishonly", "publish", "pack", "version", "restart", "stop"]);
+// prebuild, posttest & Co. laufen automatisch rund um ihr Skript. preview oder postcss sind dagegen eigene Skripte.
+const isHook = (name: string, scripts: Record<string, string>) => /^(pre|post)./.test(name) && name.replace(/^(pre|post)/, "") in scripts;
+
+const validScriptName = (name: string, scripts: Record<string, string>) => /^[a-zA-Z0-9:_.-]+$/.test(name) && !isHook(name, scripts);
+
+async function packageLaunchers(packagePath: string, projectId: string, projectPath: string): Promise<{ launchers: LauncherDefinition[]; tasks: LauncherDefinition[] }> {
   const packageJson = await readJson<PackageData>(packagePath);
-  if (!packageJson) return [];
+  if (!packageJson) return { launchers: [], tasks: [] };
   const allScripts = packageJson.scripts ?? {};
   const scripts = Object.keys(allScripts)
-    .filter((name) => packageScriptPattern.test(name) && /^[a-zA-Z0-9:_-]+$/.test(name) && !/^(pre|post)/i.test(name))
+    .filter((name) => packageScriptPattern.test(name) && validScriptName(name, allScripts))
     .sort((a, b) => {
       const priority = ["dev", "start", "serve", "preview"];
       return (priority.indexOf(a) < 0 ? 99 : priority.indexOf(a)) - (priority.indexOf(b) < 0 ? 99 : priority.indexOf(b)) || a.localeCompare(b);
@@ -353,17 +360,17 @@ async function packageLaunchers(packagePath: string, projectId: string, projectP
   const manager = await detectPackageManager(cwd, projectPath, packageJson.packageManager);
   const relativeCwd = toPosix(path.relative(projectPath, cwd)) || ".";
   const idFor = (script: string) => stableId(`${projectId}:${relativeCwd}:package:${script}`);
-  const launchers: LauncherDefinition[] = scripts.map((script, index) => {
+  const definition = (script: string, preferred: boolean): LauncherDefinition => {
     const command = packageCommand(manager, script);
     return {
       id: idFor(script), projectId,
       name: relativeCwd === "." ? script : `${path.basename(cwd)} · ${script}`,
       kind: "package-script", relativeCwd, command: command.display, cwd,
       executable: command.executable, args: command.args, dynamicPort: false,
-      preferred: script === "dev" || (index === 0 && !scripts.includes("dev")),
-      port: portFromCommand(allScripts[script] ?? ""), parentId: null, parts: []
+      preferred, port: portFromCommand(allScripts[script] ?? ""), parentId: null, parts: []
     };
-  });
+  };
+  const launchers = scripts.map((script, index) => definition(script, script === "dev" || (index === 0 && !scripts.includes("dev"))));
   // Sammelskripte zuerst, damit ein Teil dem bevorzugten Starter zugeordnet wird.
   for (const launcher of [...launchers].sort((a, b) => Number(b.preferred) - Number(a.preferred))) {
     const script = scripts[launchers.indexOf(launcher)];
@@ -375,7 +382,12 @@ async function packageLaunchers(packagePath: string, projectId: string, projectP
       return { script: part, launcherId: child?.id ?? null, port: portFromCommand(allScripts[part] ?? "") };
     });
   }
-  return launchers;
+  // Alle übrigen Skripte sind Aufgaben. Was ein Starter ohnehin mitstartet (etwa ein queue-Worker), bleibt dort.
+  const startedByLaunchers = new Set(launchers.flatMap((launcher) => launcher.parts.map((part) => part.script)));
+  const tasks = Object.keys(allScripts)
+    .filter((name) => !scripts.includes(name) && validScriptName(name, allScripts) && !lifecycleScripts.has(name.toLowerCase().replace(/^(pre|post)(?=install|uninstall|publish|pack|version)/, "")) && !startedByLaunchers.has(name))
+    .map((script) => definition(script, false));
+  return { launchers, tasks };
 }
 
 async function readDirectoryEntries(directory: string): Promise<Dirent[]> {
@@ -731,7 +743,9 @@ async function scanProject(discovered: DiscoveredProject, config: AppConfig, own
   const writtenDescription = metadata.description || primaryPackage?.description || primaryComposer?.description || htmlMeta.description || readmeMeta.description;
   const inferredDescription = writtenDescription || autoDescription(sortedTechnologies, evidence.fileCount, evidence.truncated);
 
-  const launchers = (await Promise.all(evidence.packagePaths.map((packagePath) => packageLaunchers(packagePath, projectId, projectPath)))).flat();
+  const packageScripts = await Promise.all(evidence.packagePaths.map((packagePath) => packageLaunchers(packagePath, projectId, projectPath)));
+  const launchers = packageScripts.flatMap((entry) => entry.launchers);
+  const tasks = packageScripts.flatMap((entry) => entry.tasks);
   for (const starter of evidence.starterPaths) {
     const cwd = path.dirname(starter.path);
     const relativeCwd = toPosix(path.relative(projectPath, cwd)) || ".";
@@ -829,6 +843,7 @@ async function scanProject(discovered: DiscoveredProject, config: AppConfig, own
     fileCount: evidence.fileCount,
     launchers: isOwnApp ? [] : uniqueLaunchers,
     installers: [...installers.values()],
+    tasks: isOwnApp ? [] : tasks,
     isSelf: isOwnApp,
     descriptionAuto: !writtenDescription
   };
