@@ -143,6 +143,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible,pr
 
 .workspace-dialog-body > p { font-size: var(--type-body); }
 @keyframes gw-pop { from { opacity: 0; transform: translateY(-4px); } }
+@keyframes gw-progress { from { left: -35%; } to { left: 100%; } }
 /* Lange Repository-Namen in der Seitenleiste brechen auf höchstens zwei Zeilen um. */
 :root { --font-ui: "Inter", "Segoe UI", -apple-system, system-ui, sans-serif; --font-code: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; --body: var(--font-ui); --display: var(--font-ui); --mono: var(--font-code); --type-micro: 12px; --type-caption: 13px; --type-label: 13px; --type-body: 14px; --type-body-large: 15px; --type-code: 13px; --type-title: 24px; --type-section: 20px; --sidebar-width: 232px; --workspace-gutter: 24px; --workspace-header-height: 108px; }
 body { font-family: var(--font-ui); font-size: var(--type-body); line-height: 1.5; }

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
-import { fetchAllRepositories, readGitCommit, readGitDiff, readGitHistory, runGitAction, suggestGitCommitMessage } from "../src/git-actions.js";
+import { fetchAllRepositories, onGitProgress, parseGitProgress, readGitCommit, readGitDiff, readGitHistory, runGitAction, suggestGitCommitMessage, type GitTransferProgress } from "../src/git-actions.js";
 import { readGitInfo, scanWorkspace } from "../src/scanner.js";
 import type { AppConfig } from "../src/types.js";
 
@@ -147,7 +147,18 @@ test("ruft Remote-Änderungen ab und übernimmt sie nur per Fast-forward", async
     const projects = await scanWorkspace(testConfig(root), path.join(root, "devhub-node"));
     const project = projects.find((candidate) => candidate.relativePath === "local-project");
     assert.ok(project?.git);
-    await runGitAction(project, "fetch", {});
+    const events: Array<[string, GitTransferProgress | null]> = [];
+    const unsubscribe = onGitProgress((key, progress) => events.push([key, progress]));
+    try {
+      await runGitAction(project, "fetch", {});
+    } finally {
+      unsubscribe();
+    }
+    const repository = path.resolve(project.absolutePath, project.git.repositoryRoot);
+    assert.ok(events.length >= 2);
+    assert.ok(events.every(([key]) => key === repository));
+    assert.ok(events.slice(0, -1).every(([, progress]) => progress?.phase));
+    assert.equal(events.at(-1)?.[1], null);
     project.git = await readGitInfo(projectPath, projectPath);
     assert.equal(project.git?.behind, 1);
     await runGitAction(project, "pull", {});
@@ -157,6 +168,17 @@ test("ruft Remote-Änderungen ab und übernimmt sie nur per Fast-forward", async
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("liest Fortschrittszeilen von git --progress", () => {
+  assert.deepEqual(parseGitProgress("Receiving objects:  45% (183/407), 42.00 MiB | 5.00 MiB/s"), { phase: "Empfange", percent: 45, amount: "42.00 MiB", rate: "5.00 MiB/s" });
+  assert.deepEqual(parseGitProgress("remote: Compressing objects: 100% (266/266), done.        "), { phase: "Remote komprimiert", percent: 100, amount: null, rate: null });
+  assert.deepEqual(parseGitProgress("remote: Enumerating objects: 422, done."), { phase: "Remote bereitet vor", percent: null, amount: null, rate: null });
+  assert.deepEqual(parseGitProgress("Writing objects:  12% (3/25), 1.20 MiB | 600.00 KiB/s"), { phase: "Sende", percent: 12, amount: "1.20 MiB", rate: "600.00 KiB/s" });
+  assert.deepEqual(parseGitProgress("Unpacking objects: 100% (3/3), 254 bytes | 254.00 KiB/s, done."), { phase: "Empfange", percent: 100, amount: "254 bytes", rate: "254.00 KiB/s" });
+  assert.equal(parseGitProgress("remote: Total 422 (delta 268), reused 262 (delta 150), pack-reused 0"), null);
+  assert.equal(parseGitProgress("Cloning into 'quizzly'..."), null);
+  assert.equal(parseGitProgress("fatal: Authentication failed for 'https://github.com/owner/repo.git/'"), null);
 });
 
 test("holt alle Repositories einmal und parallel, überspringt belegte und meldet Fehler", async () => {

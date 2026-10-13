@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import path from "node:path";
 import { access, appendFile, lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -159,6 +159,110 @@ async function gitDiff(repository: string, args: string[], allowDifferenceExit =
     }
     throw friendlyGitError(error);
   }
+}
+
+// Fetch, Pull, Push und Klonen übertragen bei Mediendateien schnell Hunderte MiB. Statt eines festen Timeouts gilt deshalb
+// eine Leerlaufgrenze: Mit --progress meldet Git laufend den Stand, abgebrochen wird erst, wenn es zwei Minuten still bleibt.
+const transferIdleMs = 120_000;
+const transferLimitMs = 30 * 60_000;
+
+export interface GitTransferProgress {
+  /** Abschnitt der Übertragung, etwa „Empfange“. */
+  phase: string;
+  percent: number | null;
+  /** Bisher übertragene Menge und Geschwindigkeit in Gits Schreibweise, etwa „42.00 MiB“ und „5.00 MiB/s“. */
+  amount: string | null;
+  rate: string | null;
+}
+
+const localPhases: Record<string, string> = {
+  "enumerating objects": "Bereite vor", "counting objects": "Bereite vor", "compressing objects": "Komprimiere",
+  "receiving objects": "Empfange", "unpacking objects": "Empfange", "resolving deltas": "Verarbeite",
+  "writing objects": "Sende", "updating files": "Schreibe Dateien", "checking out files": "Schreibe Dateien"
+};
+const remotePhases: Record<string, string> = {
+  "enumerating objects": "Remote bereitet vor", "counting objects": "Remote bereitet vor", "compressing objects": "Remote komprimiert", "resolving deltas": "Remote verarbeitet"
+};
+
+/** Liest eine Zeile von git --progress, etwa „Receiving objects:  45% (183/407), 42.00 MiB | 5.00 MiB/s“. */
+export function parseGitProgress(line: string): GitTransferProgress | null {
+  const match = line.trim().match(/^(remote:\s*)?([A-Za-z ]+?):\s+(?:(\d{1,3})%\s+\(\d+\/\d+\)|\d+)(?:,\s*([\d.]+ (?:bytes|[KMGT]iB)))?(?:\s*\|\s*([\d.]+ (?:bytes|[KMGT]iB)\/s))?/);
+  const phase = match && (match[1] ? remotePhases : localPhases)[match[2].toLowerCase()];
+  if (!match || !phase) return null;
+  return { phase, percent: match[3] ? Number(match[3]) : null, amount: match[4] ?? null, rate: match[5] ?? null };
+}
+
+type GitProgressListener = (key: string, progress: GitTransferProgress | null) => void;
+const progressListeners = new Set<GitProgressListener>();
+
+/** Meldet den Stand laufender Übertragungen je Repository-Pfad (beim Klonen der Zielordner); null heißt beendet. */
+export function onGitProgress(listener: GitProgressListener): () => void {
+  progressListeners.add(listener);
+  return () => progressListeners.delete(listener);
+}
+
+function transfer(command: string, args: string[], key: string, env: NodeJS.ProcessEnv): Promise<string> {
+  return new Promise((resolve, reject) => {
+    // LC_ALL=C hält die Fortschrittszeilen englisch, damit parseGitProgress sie erkennt.
+    const child = spawn(command, args, { windowsHide: true, env: { ...env, LC_ALL: "C" } });
+    const emit = (progress: GitTransferProgress | null) => { for (const listener of progressListeners) listener(key, progress); };
+    let stdout = "";
+    let messages: string[] = [];
+    let pending = "";
+    let last: GitTransferProgress | null = null;
+    let lastAt = 0;
+    let failure: Error | null = null;
+    let settled = false;
+    const stop = (error: Error) => { failure ??= error; child.kill(); };
+    let idle: NodeJS.Timeout | undefined;
+    const touch = () => {
+      clearTimeout(idle);
+      idle = setTimeout(() => stop(new Error("Seit zwei Minuten kommen keine Daten vom Remote. Der Vorgang wurde abgebrochen.")), transferIdleMs);
+    };
+    const limit = setTimeout(() => stop(new Error("Die Übertragung lief länger als 30 Minuten und wurde abgebrochen.")), transferLimitMs);
+    const handle = (line: string) => {
+      const progress = parseGitProgress(line);
+      if (!progress) {
+        if (line.trim()) messages = [...messages.slice(-49), line.trim()];
+        return;
+      }
+      // Git schreibt bei jedem Prozentpunkt eine Zeile; die Oberfläche braucht höchstens vier Stände pro Sekunde.
+      const now = Date.now();
+      if (last?.phase === progress.phase && progress.percent !== 100 && now - lastAt < 250) return;
+      last = progress;
+      lastAt = now;
+      emit(progress);
+    };
+    const finish = (error: Error | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(idle);
+      clearTimeout(limit);
+      emit(null);
+      if (error) reject(error);
+      else resolve(stdout.trim());
+    };
+    touch();
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+      touch();
+      stdout = (stdout + chunk).slice(-1_000_000);
+    });
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+      touch();
+      const lines = (pending + chunk).split(/[\r\n]/);
+      pending = lines.pop() ?? "";
+      lines.forEach(handle);
+    });
+    child.on("error", (error) => finish(friendlyGitError(error)));
+    child.on("close", (code) => {
+      if (pending) handle(pending);
+      finish(failure ?? (code === 0 ? null : friendlyGitError({ stderr: messages.join("\n") })));
+    });
+  });
+}
+
+function gitTransfer(repository: string, args: string[], key = repository): Promise<string> {
+  return transfer("git", ["-C", repository, ...args], key, { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "Never", GIT_EDITOR: "true", GIT_SEQUENCE_EDITOR: "true", GIT_MERGE_AUTOEDIT: "no" });
 }
 
 function requestedBranchName(value: unknown): string {
@@ -454,7 +558,7 @@ export async function runGitAction(project: ProjectDefinition, action: GitAction
   }
   if (action === "fetch") {
     if (!info.remoteName || !/^[\w.-]+$/.test(info.remoteName)) throw new Error("Kein verwendbares Git-Remote erkannt.");
-    await git(repository, ["fetch", info.remoteName, "--prune"], 60_000);
+    await gitTransfer(repository, ["fetch", "--progress", info.remoteName, "--prune"]);
     return "Remote-Stand wurde abgerufen.";
   }
   if (action === "pull") {
@@ -463,7 +567,7 @@ export async function runGitAction(project: ProjectDefinition, action: GitAction
     // Fast-forward bleibt der sichere Standard. Bei auseinandergelaufenen Branches wählt die Oberfläche Merge oder Rebase explizit.
     const method = payload.method === "merge" ? "merge" : payload.method === "rebase" ? "rebase" : "ff-only";
     if (method !== "ff-only" && info.dirty) throw new Error("Committe oder sichere deine Änderungen, bevor du Merge oder Rebase startest.");
-    await git(repository, ["pull", method === "ff-only" ? "--ff-only" : method === "merge" ? "--no-rebase" : "--rebase", ...(method === "merge" ? ["--no-edit"] : [])], 60_000);
+    await gitTransfer(repository, ["pull", "--progress", method === "ff-only" ? "--ff-only" : method === "merge" ? "--no-rebase" : "--rebase", ...(method === "merge" ? ["--no-edit"] : [])]);
     return method === "ff-only" ? "Remote-Commits wurden übernommen." : method === "merge" ? "Remote-Commits per Merge übernommen." : "Eigene Commits per Rebase auf den Remote-Stand gesetzt.";
   }
   if (action === "checkout") {
@@ -502,8 +606,8 @@ export async function runGitAction(project: ProjectDefinition, action: GitAction
   if (action === "push") {
     if (!info.branch) throw new Error("Ein Push ist im detached-HEAD-Zustand nicht verfügbar.");
     if (!info.remoteName || !/^[\w.-]+$/.test(info.remoteName)) throw new Error("Kein verwendbares Git-Remote erkannt.");
-    if (info.upstream) await git(repository, ["push"], 60_000);
-    else await git(repository, ["push", "--set-upstream", info.remoteName, info.branch], 60_000);
+    if (info.upstream) await gitTransfer(repository, ["push", "--progress"]);
+    else await gitTransfer(repository, ["push", "--progress", "--set-upstream", info.remoteName, info.branch]);
     return "Commits wurden zum Remote übertragen.";
   }
   throw new Error("Unbekannte Git-Aktion.");
@@ -779,7 +883,7 @@ async function runAdvancedGitAction(project: ProjectDefinition, action: GitActio
     else {
       const remote = textValue(payload.remote);
       if (!(await readGitWorkspace(project)).remotes.some(item => item.name === remote)) throw new Error("Wähle ein vorhandenes Remote.");
-      await git(repository, ["push", remote, `refs/tags/${name}`], 60_000);
+      await gitTransfer(repository, ["push", "--progress", remote, `refs/tags/${name}`]);
     }
     return action === "delete-tag" ? `Lokales Tag „${name}“ gelöscht.` : `Tag „${name}“ veröffentlicht.`;
   }
@@ -825,7 +929,7 @@ async function cloneDestination(root: string, value: unknown): Promise<string> {
 
 export async function cloneGitRepository(root: string, payload: GitActionPayload): Promise<void> {
   const destination = await cloneDestination(root, payload.name);
-  await git(root, ["clone", "--", remoteUrl(payload.url), destination], 120_000);
+  await gitTransfer(root, ["clone", "--progress", "--", remoteUrl(payload.url), destination], destination);
 }
 
 // GitHub CLI: Repositories des angemeldeten Kontos auflisten und mit dessen Anmeldung klonen.
@@ -882,9 +986,6 @@ export async function cloneGitHubRepository(root: string, payload: GitActionPayl
   const repo = textValue(payload.repo, 200);
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || repo.includes("..")) throw new Error("Wähle ein Repository im Format konto/name.");
   const destination = await cloneDestination(root, payload.name);
-  try {
-    await gh(["repo", "clone", repo, destination], 180_000);
-  } catch (error) {
-    throw friendlyGitError(error);
-  }
+  // Alles nach -- reicht gh an git clone weiter.
+  await transfer("gh", ["repo", "clone", repo, destination, "--", "--progress"], destination, { ...process.env, GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1", GIT_TERMINAL_PROMPT: "0" });
 }

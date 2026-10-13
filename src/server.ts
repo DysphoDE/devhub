@@ -5,7 +5,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, getAppDirectory, saveScanRoot } from "./config.js";
-import { advancedGitActions, fetchAllRepositories, readGitWorkspace, readGitStash, readGitStats, readGitComparison, initializeGitRepository, cloneGitRepository, cloneGitHubRepository, listGitHubRepositories, readGitBranches, readGitCommit, readGitDiff, readGitHistory, runGitAction, suggestGitCommitMessage, type GitAction, type GitActionPayload } from "./git-actions.js";
+import { advancedGitActions, fetchAllRepositories, onGitProgress, readGitWorkspace, readGitStash, readGitStats, readGitComparison, initializeGitRepository, cloneGitRepository, cloneGitHubRepository, listGitHubRepositories, readGitBranches, readGitCommit, readGitDiff, readGitHistory, runGitAction, suggestGitCommitMessage, type GitAction, type GitActionPayload } from "./git-actions.js";
 import { markInstalled } from "./dependencies.js";
 import { ProcessManager } from "./process-manager.js";
 import { RunHistory, runFromSnapshot } from "./run-history.js";
@@ -129,6 +129,11 @@ processManager.onChange((launcherId, runtime) => {
   if (run && projects.some((project) => project.tasks.some((task) => task.id === launcherId))) runHistory.record(launcherId, run);
 });
 processManager.onLog((launcherId, entry) => broadcast("log", { launcherId, entry }));
+// Fortschritt von Fetch, Pull, Push und Klonen; ein Klon gehört noch zu keinem Projekt und kommt ohne IDs an.
+onGitProgress((repository, progress) => {
+  const ids = projects.filter((project) => project.git && path.resolve(project.absolutePath, project.git.repositoryRoot) === repository).map((project) => project.id);
+  broadcast("git-progress", { ids, progress });
+});
 
 let lastProjectsPayload = "";
 

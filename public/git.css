@@ -277,6 +277,17 @@
 .gw-notice > span,.gw-resource-error > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .gw-notice .gw-icon-button { min-height: 22px; height: 22px; }
 .gw-notice.error,.gw-resource-error { color: #a54e57; background: #fff3f4; border-color: #f2dde0; }
+.gw-notice.progress { color: var(--gw-muted); background: var(--gw-surface-2); border-color: var(--gw-border); }
+.gw-notice.progress strong { color: var(--gw-ink); font-weight: 600; white-space: nowrap; }
+
+/* Fortschritt von Fetch, Pull, Push und Klonen: Balken mit Abschnitt, Prozent, Menge und Geschwindigkeit. */
+.gw-progress { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: var(--gw-muted); font-size: var(--type-micro); }
+.gw-progress-track { position: relative; height: 4px; overflow: hidden; border-radius: 2px; background: var(--gw-border); }
+.gw-progress-track i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--gw-blue); transition: width .25s linear; }
+.gw-progress.indeterminate .gw-progress-track i { width: 35% !important; animation: gw-progress 1.2s ease-in-out infinite; }
+.gw-progress-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.gw-bar-sync .gw-progress { width: clamp(150px, 22vw, 280px); }
+.gw-board-progress { margin-top: -4px; }
 
 /* History */
 .gw-history-list { min-height: 0; display: flex; flex-direction: column; border-right: 1px solid var(--gw-border); background: #fff; padding-top: 12px; }

@@ -1227,6 +1227,7 @@ function connectEvents() {
     loadActiveGitSurface(true);
     elements.scanStatus.textContent = "Automatisch aktualisiert";
   });
+  events.addEventListener("git-progress", (event) => gitWorkspace.progress(JSON.parse(event.data)));
   events.addEventListener("workspace", (event) => { const data = JSON.parse(event.data); setWorkspaceRoot(data.root); state.projects = data.projects; render(false); });
   events.onopen = () => { elements.scanStatus.textContent = "Live verbunden"; };
   events.onerror = () => { elements.scanStatus.textContent = "Live-Verbindung wird wiederhergestellt …"; };

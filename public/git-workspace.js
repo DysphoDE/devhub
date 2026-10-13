@@ -22,6 +22,8 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
   let githubStatus = null;
   let githubStatusAt = 0;
   let githubStatusLoading = false;
+  // Laufende Übertragungen (Fetch, Pull, Push, Klonen) je Projekt-ID; ein Klon hat noch kein Projekt und läuft unter "clone".
+  const transfers = new Map();
   try { dismissedGuides = new Set(JSON.parse(localStorage.getItem("devhub_git_guides") || "[]")); } catch { /* ignore */ }
   const icon = name => `<i class="fa-solid fa-${name}" aria-hidden="true"></i>`;
   const selected = () => state.projects.find(p => p.id === state.activeGitProjectId);
@@ -64,6 +66,12 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
   const field = (label, name, value = "", options = "") => `<label class="gw-field"><span>${label}</span><input name="${name}" value="${esc(value)}" ${options}></label>`;
   const resourceError = value => value?.error ? `<div class="gw-resource-error" role="alert">${icon("triangle-exclamation")}<span>${esc(value.error)}</span>${button("Erneut laden", "refresh")}</div>` : "";
   const operationName = op => ({ merge: "Merge", rebase: "Rebase", "cherry-pick": "Cherry-pick", revert: "Revert" })[op] || "Git-Vorgang";
+  const transferSize = value => value ? value.replace(" bytes", " B").replace(/^[\d.]+/, n => Number(n).toLocaleString("de-DE", { maximumFractionDigits: 1 })) : "";
+  const transferText = t => [t.percent === null ? t.phase : `${t.phase} ${t.percent} %`, transferSize(t.amount), transferSize(t.rate)].filter(Boolean).join(" · ");
+  const transferView = key => {
+    const t = transfers.get(key);
+    return t ? `<span class="gw-progress ${t.percent === null ? "indeterminate" : ""}" data-gw-progress="${esc(key)}" title="Git zählt die Prozent nach Objekten, die Gesamtgröße kennt es vorher nicht. Große Dateien lassen den Balken deshalb langsamer wachsen." role="progressbar" aria-label="Übertragung" aria-valuemin="0" aria-valuemax="100" ${t.percent === null ? "" : `aria-valuenow="${t.percent}"`}><span class="gw-progress-track"><i data-width="${t.percent ?? 100}"></i></span><span class="gw-progress-text">${esc(transferText(t))}</span></span>` : "";
+  };
 
   async function read(id, resource, url, force = false) {
     const k = key(id, resource);
@@ -192,7 +200,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
       </nav>
       <nav class="gw-segtabs" aria-label="Ansicht">${tab("changes", "Änderungen", g.changedFiles)}${tab("history", "Verlauf")}${secondary ? `<span class="gw-segtab-extra">${tab(s.tab, secondary[1])}${button(icon("xmark"), "tab", 'data-value="changes" aria-label="Zurück zu den Änderungen" title="Schließen"', false, "gw-icon-button")}</span>` : ""}</nav>
       <span class="gw-bar-spacer"></span>
-      <div class="gw-bar-sync tone-${info.tone}"><span class="gw-bar-hint" title="${esc(info.hint)}">${info.chip ? `<span class="gw-chip tone-${info.tone}">${info.chip}</span>` : ""}${esc(info.hint)}</span>${sync}</div>
+      <div class="gw-bar-sync tone-${info.tone}">${transfers.has(p.id) ? transferView(p.id) : `<span class="gw-bar-hint" title="${esc(info.hint)}">${info.chip ? `<span class="gw-chip tone-${info.tone}">${info.chip}</span>` : ""}${esc(info.hint)}</span>`}${sync}</div>
       <span class="gw-more-wrap">${button(icon("ellipsis"), "menu", `data-value="more" aria-haspopup="menu" aria-expanded="${menu === "more"}" aria-label="Repository-Menü" title="Repository-Menü"`, false, `gw-icon-button gw-more ${menu === "more" ? "open" : ""}`)}${menu === "more" ? morePopover(p, w) : ""}</span>
     </header>`;
   }
@@ -527,7 +535,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
         <div class="gw-board-meta"><code>${esc(p.relativePath)} · ${esc(p.git.branch || "detached")}</code><small>${plural(total(p), "Commit", "Commits")} in 30 Tagen</small></div>
         ${spark(p)}
         <p class="gw-board-commit" title="${esc(p.git.lastCommit?.subject || "")}">${p.git.lastCommit ? esc(p.git.lastCommit.subject) : '<span class="gw-muted">Noch kein Commit</span>'}</p>
-        ${githubLine(p)}
+        ${transfers.has(p.id) ? `<div class="gw-board-progress">${transferView(p.id)}</div>` : githubLine(p)}
         <footer><span>${p.git.lastCommit ? ago(p.git.lastCommit.date) : ""}</span>${p.git.staleBranches?.length ? button(`${icon("broom")} ${plural(p.git.staleBranches.length, "alter Branch", "alte Branches")}`, "cleanup-branches", `data-id="${p.id}" title="Aufräumen: ${esc(p.git.staleBranches.join(", "))}"`, false, "gw-link gw-board-stale") : ""}${quick(p)}</footer>
       </article>`;
     queueMicrotask(() => loadGitHubStatus());
@@ -566,7 +574,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
     const body = !repositories.length ? empty("code-branch", "Dein Git-Arbeitsbereich", "Klone ein Repository oder aktiviere Git in einem vorhandenen Projekt.", button("Repository hinzufügen", "add", "", false, "gw-primary"))
       : showOverview ? overviewView(repositories)
       : header(p, w) + guide(p, w) + (notice?.id === p.id ? `<div class="gw-notice ${notice.error ? "error" : "success"}" role="${notice.error ? "alert" : "status"}">${icon(notice.error ? "circle-exclamation" : "circle-check")}<span>${esc(notice.message)}</span>${button(icon("xmark"), "dismiss-notice", 'aria-label="Meldung schließen"', false, "gw-icon-button")}</div>` : "") + `<div class="gw-view" data-gw-scroll="view">${s.tab === "changes" ? changeView(p) : s.tab === "history" ? historyView(p) : s.tab === "branches" ? branchView(p, w) : s.tab === "stashes" ? stashView(p, w) : s.tab === "tags" ? tagsView(p, w) : settingsView(p, w)}</div>`;
-    const html = `<div class="gw-shell ${menu ? "menu-open" : ""}"><main class="gw-main" aria-label="Git-Repository">${body}</main></div>`;
+    const html = `<div class="gw-shell ${menu ? "menu-open" : ""}"><main class="gw-main" aria-label="Git-Repository">${transfers.has("clone") ? `<div class="gw-notice progress" role="status">${icon("cloud-arrow-down")}<strong>Repository wird geklont</strong>${transferView("clone")}</div>` : ""}${body}</main></div>`;
     if (root.__gwHtml !== html) {
       root.__gwHtml = html;
       root.innerHTML = html;
@@ -575,6 +583,27 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
       if (focusKey) { const el = document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`); el?.focus({ preventScroll: true }); if (selection && el?.setSelectionRange) { try { el.setSelectionRange(...selection); } catch { /* search fields */ } } }
     }
     if (p && !data(p.id, "workspace") && !pendingReads.has(key(p.id, "workspace"))) queueMicrotask(() => ensure(p.id));
+  }
+
+  // Der Server meldet bis zu vier Stände pro Sekunde und Repository. Sichtbare Balken werden direkt aktualisiert,
+  // neu gezeichnet wird nur, wenn ein Balken erscheint oder verschwindet.
+  let progressFrame = 0;
+  function progress({ ids, progress: value }) {
+    const keys = ids.length ? ids : ["clone"];
+    let changed = false;
+    for (const key of keys) {
+      if (value) transfers.set(key, value); else transfers.delete(key);
+      const nodes = root.querySelectorAll(`[data-gw-progress="${CSS.escape(key)}"]`);
+      const shown = key === "clone" || view === "overview" || key === state.activeGitProjectId;
+      if (!value || !nodes.length) { changed ||= shown; continue; }
+      for (const node of nodes) {
+        node.classList.toggle("indeterminate", value.percent === null);
+        if (value.percent === null) node.removeAttribute("aria-valuenow"); else node.setAttribute("aria-valuenow", value.percent);
+        node.querySelector("i").style.width = `${value.percent ?? 100}%`;
+        node.querySelector(".gw-progress-text").textContent = transferText(value);
+      }
+    }
+    if (changed && !progressFrame) progressFrame = requestAnimationFrame(() => { progressFrame = 0; render(); });
   }
 
   async function run(action, payload = {}, id = selected()?.id) {
@@ -601,6 +630,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
       if (notice) activity.unshift({ ...notice, time: new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) });
       if (activity.length > 100) activity.length = 100;
       busy = null;
+      transfers.clear();
       if (id) invalidate(id);
       if (action === "fetch-all") { cache.clear(); pendingReads.clear(); }
       renderApp();
@@ -845,7 +875,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
     if (file && ["ArrowDown", "ArrowUp"].includes(event.key)) { event.preventDefault(); const files = [...root.querySelectorAll('.gw-file > button[data-gw="file"]')]; const next = files[files.indexOf(file) + (event.key === "ArrowDown" ? 1 : -1)]; if (next) { const path = next.dataset.path; interact(next).then(() => root.querySelector(`.gw-file > button[data-path="${CSS.escape(path)}"]`)?.focus()); } }
   });
   return {
-    render, load: ensure,
+    render, load: ensure, progress,
     openAddRepository: () => { if (!busy) addRepository(); },
     // Für die Befehlspalette und die Projektliste: GitHub-Repositories des angemeldeten Kontos und der Klon-Dialog.
     githubRepositories: async () => { await loadGithub(); return github; },
