@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { commitActivity, composedScripts, portFromCommand, scanWorkspace } from "../src/scanner.js";
+import { affectsProjectMetadata, commitActivity, composedScripts, portFromCommand, scanWorkspace } from "../src/scanner.js";
 import type { AppConfig } from "../src/types.js";
 
 function testConfig(root: string): AppConfig {
@@ -390,5 +390,14 @@ test("führt übrige Package-Skripte als Aufgaben, ohne Lifecycle-Hooks und mitg
     assert.ok(projects[0].tasks.every((task) => task.kind === "package-script" && !task.preferred));
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("only project-defining files require a full workspace scan", () => {
+  for (const file of ["package.json", "composer.lock", "pnpm-lock.yaml", "start.bat", "README.md", "docs/readme.txt", "index.html", "public/index.html", "thumbnail.png", "web/project.ini"]) {
+    assert.ok(affectsProjectMetadata(file), file);
+  }
+  for (const file of ["src/app.ts", "src/components/card.php", "deep/a/b/index.html", "assets/img/thumbnail.png", "notes.txt", "src"]) {
+    assert.ok(!affectsProjectMetadata(file), file);
   }
 });

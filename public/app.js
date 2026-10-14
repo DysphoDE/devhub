@@ -1059,7 +1059,9 @@ async function bootstrap() {
     loadMissingLogTails();
     setTimeout(connectEvents, 1000);
     setTimeout(loadGithubRepositories, 1500);
-    setInterval(refreshStack, 8000);
+    // Dienste (Webserver, Datenbank) nur abfragen, solange DevHub sichtbar ist; der Server startet dafür jedes Mal tasklist.
+    setInterval(() => { if (!document.hidden) refreshStack(); }, 8000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshStack(); });
   } catch (error) {
     elements.scanStatus.textContent = "Verbindung fehlgeschlagen";
     toast(error.message, "error");
@@ -1190,6 +1192,7 @@ function installDependencies(projectId) {
 
 // Läuft eine Aufgabe im geöffneten Projekt, zählt die Laufzeit im Detailbereich auch ohne neue Ausgabe weiter.
 setInterval(() => {
+  if (document.hidden) return;
   const project = state.projects.find((item) => item.id === state.selectedProjectId);
   if (project?.tasks?.some((task) => task.runtime.status === "running")) schedulePanelRender();
 }, 1000);
@@ -1228,6 +1231,7 @@ function connectEvents() {
     elements.scanStatus.textContent = "Automatisch aktualisiert";
   });
   events.addEventListener("git-progress", (event) => gitWorkspace.progress(JSON.parse(event.data)));
+  events.addEventListener("git-fetch-all", (event) => gitWorkspace.fetchAllProgress(JSON.parse(event.data)));
   events.addEventListener("workspace", (event) => { const data = JSON.parse(event.data); setWorkspaceRoot(data.root); state.projects = data.projects; render(false); });
   events.onopen = () => { elements.scanStatus.textContent = "Live verbunden"; };
   events.onerror = () => { elements.scanStatus.textContent = "Live-Verbindung wird wiederhergestellt …"; };

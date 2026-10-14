@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
-import { fetchAllRepositories, onGitProgress, parseGitProgress, readGitCommit, readGitDiff, readGitHistory, runGitAction, suggestGitCommitMessage, type GitTransferProgress } from "../src/git-actions.js";
+import { fetchAllRepositories, onGitProgress, parseGitProgress, readGitCommit, readGitDiff, readGitHistory, readRefsFromDisk, refsMatchRemote, runGitAction, suggestGitCommitMessage, type GitTransferProgress, type RemoteRefs } from "../src/git-actions.js";
 import { readGitInfo, scanWorkspace } from "../src/scanner.js";
 import type { AppConfig } from "../src/types.js";
 
@@ -239,6 +239,102 @@ test("holt alle Repositories einmal und parallel, überspringt belegte und melde
     assert.ok(!settled.has("delta"));
     const remoteHead = (await execFileAsync("git", ["-C", path.join(workspace, "alpha"), "log", "-1", "--format=%s", "origin/main"])).stdout.trim();
     assert.equal(remoteHead, "Remote change");
+    const alphaEntry = result.snapshot.entries.find((entry) => entry.name === alpha.name)!;
+    assert.equal(alphaEntry.state, "updated");
+    assert.deepEqual(alphaEntry.ids.sort(), [alpha.id, "alpha-frontend"].sort());
+    assert.deepEqual(alphaEntry.changes, [{ name: "main", kind: "branch", change: "updated", commits: 1 }]);
+    assert.equal(result.snapshot.entries.find((entry) => entry.name === "Beta")?.state, "current");
+    assert.equal(result.snapshot.phase, "done");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("vergleicht lokale Refs mit dem Remote-Stand", () => {
+  const local = new Map([["refs/remotes/origin/HEAD", "a"], ["refs/remotes/origin/main", "a"], ["refs/remotes/origin/dev", "b"], ["refs/tags/v1", "t"], ["refs/tags/lokal", "x"]]);
+  assert.ok(refsMatchRemote(local, "origin", { heads: { main: "a", dev: "b" }, tags: { v1: "t" } }));
+  assert.ok(!refsMatchRemote(local, "origin", { heads: { main: "c", dev: "b" }, tags: {} }), "Branch bewegt");
+  assert.ok(!refsMatchRemote(local, "origin", { heads: { main: "a" }, tags: {} }), "Branch auf dem Remote gelöscht");
+  assert.ok(!refsMatchRemote(local, "origin", { heads: { main: "a", dev: "b", neu: "d" }, tags: {} }), "neuer Branch");
+  assert.ok(!refsMatchRemote(local, "origin", { heads: { main: "a", dev: "b" }, tags: { v2: "u" } }), "neues Tag");
+});
+
+test("überspringt den Fetch, wenn der bekannte Remote-Stand schon lokal ist, und meldet neue Branches", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "devhub-git-"));
+  try {
+    const remote = path.join(root, "remote.git");
+    const workspace = path.join(root, "workspace");
+    const seed = path.join(root, "seed");
+    await mkdir(workspace);
+    await mkdir(seed);
+    await git(seed, "init", "-b", "main");
+    await git(seed, "config", "user.name", "DevHub Test");
+    await git(seed, "config", "user.email", "devhub@example.test");
+    await writeFile(path.join(seed, "readme.txt"), "one\n");
+    await git(seed, "add", "readme.txt");
+    await git(seed, "commit", "-m", "Initial commit");
+    await execFileAsync("git", ["clone", "-q", "--bare", seed, remote]);
+    await execFileAsync("git", ["clone", "-q", remote, path.join(workspace, "alpha")]);
+    const alpha = path.join(workspace, "alpha");
+    const head = (await execFileAsync("git", ["-C", alpha, "rev-parse", "origin/main"])).stdout.trim();
+    const projects = await scanWorkspace(testConfig(workspace), path.join(root, "devhub-node"));
+    const options = (lookup: Map<string, RemoteRefs>, changedFlags: boolean[]) => ({
+      claim: () => true,
+      settle: async (_repository: string, _members: unknown, changed: boolean) => { changedFlags.push(changed); },
+      lookup: async () => lookup
+    });
+
+    const flags: boolean[] = [];
+    const quiet = await fetchAllRepositories(projects, options(new Map([[alpha, { heads: { main: head }, tags: {} }]]), flags));
+    assert.equal(quiet.fetched, 0);
+    assert.equal(quiet.current, 1);
+    assert.equal(quiet.snapshot.entries[0].verified, true);
+    assert.deepEqual(flags, [false]);
+
+    await git(seed, "push", "-q", remote, "main:feature/neu");
+    await git(seed, "tag", "v1");
+    await git(seed, "push", "-q", remote, "v1");
+    // Der veraltete Stand aus der API stimmt nicht mehr: jetzt wird wirklich geholt.
+    const loud = await fetchAllRepositories(projects, options(new Map([[alpha, { heads: { main: head, "feature/neu": head }, tags: {} }]]), flags));
+    assert.equal(loud.fetched, 1);
+    assert.equal(loud.updated, 1);
+    assert.deepEqual(loud.snapshot.entries[0].changes, [
+      { name: "feature/neu", kind: "branch", change: "new", commits: null },
+      { name: "v1", kind: "tag", change: "new", commits: null }
+    ]);
+    assert.deepEqual(flags, [false, true]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("liest Refs aus .git genauso wie git for-each-ref", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "devhub-git-"));
+  try {
+    const seed = path.join(root, "seed");
+    const clone = path.join(root, "clone");
+    await mkdir(seed);
+    await git(seed, "init", "-b", "main");
+    await git(seed, "config", "user.name", "DevHub Test");
+    await git(seed, "config", "user.email", "devhub@example.test");
+    await writeFile(path.join(seed, "readme.txt"), "one\n");
+    await git(seed, "add", "readme.txt");
+    await git(seed, "commit", "-m", "Initial commit");
+    await git(seed, "branch", "feature/a");
+    await git(seed, "tag", "-a", "v1", "-m", "Release");
+    await git(seed, "tag", "leicht");
+    await execFileAsync("git", ["clone", "-q", seed, clone]);
+    // Ein Teil gepackt, ein Teil lose: Danach kommt ein neuer Commit, dessen Ref als Datei neben packed-refs liegt.
+    await git(clone, "pack-refs", "--all");
+    await writeFile(path.join(seed, "readme.txt"), "two\n");
+    await git(seed, "commit", "-am", "Second");
+    await git(clone, "fetch", "-q", "origin");
+    const expected = (await execFileAsync("git", ["-C", clone, "for-each-ref", "--format=%(refname) %(objectname)", "refs/remotes/origin/", "refs/tags/"])).stdout.trim().split(/\r?\n/)
+      .filter((line) => !line.startsWith("refs/remotes/origin/HEAD ")).sort();
+    const actual = await readRefsFromDisk(clone, ["refs/remotes/origin/", "refs/tags/"]);
+    assert.ok(actual);
+    assert.deepEqual([...actual].map(([name, oid]) => `${name} ${oid}`).sort(), expected);
+    assert.equal(await readRefsFromDisk(path.join(root, "kein-repo"), ["refs/tags/"]), null);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

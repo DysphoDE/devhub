@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import path from "node:path";
-import { access, appendFile, lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, appendFile, lstat, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { promisify } from "node:util";
@@ -261,8 +261,8 @@ function transfer(command: string, args: string[], key: string, env: NodeJS.Proc
   });
 }
 
-function gitTransfer(repository: string, args: string[], key = repository): Promise<string> {
-  return transfer("git", ["-C", repository, ...args], key, { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "Never", GIT_EDITOR: "true", GIT_SEQUENCE_EDITOR: "true", GIT_MERGE_AUTOEDIT: "no" });
+function gitTransfer(repository: string, args: string[], key = repository, extraEnv: NodeJS.ProcessEnv = {}): Promise<string> {
+  return transfer("git", ["-C", repository, ...args], key, { ...process.env, GIT_TERMINAL_PROMPT: "0", GCM_INTERACTIVE: "Never", GIT_EDITOR: "true", GIT_SEQUENCE_EDITOR: "true", GIT_MERGE_AUTOEDIT: "no", ...extraEnv });
 }
 
 function requestedBranchName(value: unknown): string {
@@ -441,21 +441,136 @@ export async function suggestGitCommitMessage(project: ProjectDefinition, reques
   return `${verb} ${commitTarget(files)}`.slice(0, 200);
 }
 
+/** Stand eines Remotes: Branch- und Tag-Namen mit ihrer Objekt-ID, etwa aus der GitHub-API. */
+export interface RemoteRefs {
+  heads: Record<string, string>;
+  tags: Record<string, string>;
+}
+
 export interface FetchAllOptions {
   /** Liefert false, wenn für das Repository bereits eine andere Git-Aktion läuft. */
   claim(repository: string): boolean;
-  /** Läuft nach jedem Fetch, auch nach einem fehlgeschlagenen, mit allen Projekten des Repositorys. */
-  settle(repository: string, members: ProjectDefinition[]): Promise<void>;
+  /** Läuft nach jedem Repository, auch nach einem Fehler; changed ist false, wenn sich keine Ref bewegt hat. */
+  settle(repository: string, members: ProjectDefinition[], changed: boolean): Promise<void>;
   concurrency?: number;
+  /** Liefert den bekannten Remote-Stand je Repository-Pfad. Stimmt er mit den lokalen Refs überein, entfällt der Fetch. */
+  lookup?(repositories: Array<{ repository: string; project: ProjectDefinition }>): Promise<Map<string, RemoteRefs>>;
+  /** Zusätzliche Umgebung für git fetch, etwa ein Token statt des langsamen Credential Managers. */
+  fetchEnv?(project: ProjectDefinition): NodeJS.ProcessEnv | null;
+  /** Meldet jeden Zwischenstand, damit die Oberfläche den Fortschritt zeigen kann. */
+  onUpdate?(snapshot: FetchAllSnapshot): void;
+}
+
+export interface FetchAllRefChange {
+  name: string;
+  kind: "branch" | "tag";
+  change: "new" | "updated" | "forced" | "deleted";
+  /** Neue Commits bei einem aktualisierten Branch. */
+  commits: number | null;
+}
+
+export interface FetchAllEntry {
+  repository: string;
+  name: string;
+  ids: string[];
+  state: "waiting" | "fetching" | "current" | "updated" | "failed" | "skipped";
+  /** true, wenn der Abgleich mit dem Remote-Stand den Fetch erspart hat. */
+  verified: boolean;
+  changes: FetchAllRefChange[];
+  error: string | null;
+  ms: number | null;
+}
+
+export interface FetchAllSnapshot {
+  phase: "checking" | "fetching" | "done";
+  startedAt: string;
+  finishedAt: string | null;
+  entries: FetchAllEntry[];
 }
 
 export interface FetchAllResult {
   fetched: number;
+  updated: number;
+  current: number;
   skipped: number;
   failed: { name: string; error: string }[];
+  snapshot: FetchAllSnapshot;
+}
+
+/** Remote-Tracking-Branches des Remotes und alle Tags, jeweils voller Ref-Name auf Objekt-ID. */
+async function trackingRefs(repository: string, remote: string): Promise<Map<string, string>> {
+  const prefixes = [`refs/remotes/${remote}/`, "refs/tags/"];
+  const fromDisk = await readRefsFromDisk(repository, prefixes);
+  if (fromDisk) return fromDisk;
+  const output = await git(repository, ["for-each-ref", "--format=%(refname)%09%(objectname)", ...prefixes]);
+  return new Map(output.split(/\r?\n/).filter(Boolean).map((line) => line.split("\t") as [string, string]));
+}
+
+// Ein git-Aufruf kostet unter Windows mit Virenscanner leicht eine Sekunde, bei 40 Repositories summiert sich das.
+// Refs liegen als Dateien vor: packed-refs plus einzelne Dateien unter .git/refs, die Vorrang haben. Für
+// Sonderfälle (Worktree mit .git-Datei, Reftable-Format) liefert die Funktion null, dann fragt der Aufrufer git.
+export async function readRefsFromDisk(repository: string, prefixes: string[]): Promise<Map<string, string> | null> {
+  const gitDirectory = path.join(repository, ".git");
+  const info = await stat(gitDirectory).catch(() => null);
+  if (!info?.isDirectory() || await access(path.join(gitDirectory, "reftable")).then(() => true, () => false)) return null;
+  const refs = new Map<string, string>();
+  const packed = await readFile(path.join(gitDirectory, "packed-refs"), "utf8").catch(() => "");
+  for (const line of packed.split(/\r?\n/)) {
+    // Zeilen mit ^ sind die aufgelösten Commits annotierter Tags, die Ref selbst zeigt auf das Tag-Objekt.
+    const match = line.match(/^([0-9a-f]{40,64}) (refs\/\S+)$/);
+    if (match && prefixes.some((prefix) => match[2].startsWith(prefix))) refs.set(match[2], match[1]);
+  }
+  const walk = async (relative: string): Promise<void> => {
+    const entries = await readdir(path.join(gitDirectory, relative), { withFileTypes: true }).catch(() => []);
+    await Promise.all(entries.map(async (entry) => {
+      const name = `${relative}${entry.name}`;
+      if (entry.isDirectory()) return walk(`${name}/`);
+      // Symbolische Refs wie origin/HEAD enthalten "ref: …" und werden übersprungen.
+      const oid = (await readFile(path.join(gitDirectory, name), "utf8").catch(() => "")).trim();
+      if (/^[0-9a-f]{40,64}$/.test(oid)) refs.set(name, oid);
+    }));
+  };
+  await Promise.all(prefixes.map(walk));
+  return refs;
+}
+
+/** Stimmen die lokalen Refs mit dem Remote überein? Lokale Tags dürfen zusätzlich existieren. */
+export function refsMatchRemote(local: Map<string, string>, remote: string, refs: RemoteRefs): boolean {
+  const prefix = `refs/remotes/${remote}/`;
+  const localHeads = [...local].filter(([name]) => name.startsWith(prefix) && name !== `${prefix}HEAD`);
+  const remoteHeads = Object.entries(refs.heads);
+  if (localHeads.length !== remoteHeads.length) return false;
+  return remoteHeads.every(([name, oid]) => local.get(prefix + name) === oid)
+    && Object.entries(refs.tags).every(([name, oid]) => local.get(`refs/tags/${name}`) === oid);
+}
+
+async function refChanges(repository: string, remote: string, before: Map<string, string>, after: Map<string, string>): Promise<FetchAllRefChange[]> {
+  const prefix = `refs/remotes/${remote}/`;
+  const names = [...new Set([...before.keys(), ...after.keys()])].filter((name) => name !== `${prefix}HEAD` && before.get(name) !== after.get(name)).sort();
+  return Promise.all(names.map(async (ref): Promise<FetchAllRefChange> => {
+    const kind = ref.startsWith("refs/tags/") ? "tag" : "branch";
+    const name = ref.startsWith(prefix) ? ref.slice(prefix.length) : ref.replace(/^refs\/tags\//, "");
+    const old = before.get(ref);
+    const next = after.get(ref);
+    if (!old) return { name, kind, change: "new", commits: null };
+    if (!next) return { name, kind, change: "deleted", commits: null };
+    if (kind === "tag") return { name, kind, change: "updated", commits: null };
+    // Links stehen Commits, die nur der alte Stand hatte (Force-Push), rechts die neuen.
+    const counts = await git(repository, ["rev-list", "--left-right", "--count", `${old}...${next}`]).catch(() => "");
+    const [lost, added] = counts.split(/\s+/).map(Number);
+    return { name, kind, change: lost > 0 ? "forced" : "updated", commits: Number.isFinite(added) ? added : null };
+  }));
+}
+
+// Git aktualisiert die Zeit von FETCH_HEAD nur bei einem echten Fetch. Nach einem erfolgreichen Abgleich ist der Stand genauso frisch.
+async function touchFetchHead(repository: string): Promise<void> {
+  const now = new Date();
+  await utimes(path.join(repository, ".git", "FETCH_HEAD"), now, now).catch(() => undefined);
 }
 
 // Projekte im selben Repository (etwa Frontend und Backend eines Monorepos) teilen sich einen Fetch.
+// Ein Fetch kostet unter Windows Sekunden, auch wenn nichts Neues kommt. Liefert lookup den Remote-Stand,
+// wird deshalb nur geholt, wo sich laut Remote etwas bewegt hat.
 export async function fetchAllRepositories(projects: ProjectDefinition[], options: FetchAllOptions): Promise<FetchAllResult> {
   const groups = new Map<string, ProjectDefinition[]>();
   for (const project of projects) {
@@ -463,21 +578,63 @@ export async function fetchAllRepositories(projects: ProjectDefinition[], option
     const repository = path.resolve(project.absolutePath, project.git.repositoryRoot);
     groups.set(repository, [...(groups.get(repository) ?? []), project]);
   }
-  const result: FetchAllResult = { fetched: 0, skipped: 0, failed: [] };
-  await mapLimit([...groups], options.concurrency ?? 6, async ([repository, members]) => {
-    if (!options.claim(repository)) {
+  const snapshot: FetchAllSnapshot = {
+    phase: options.lookup ? "checking" : "fetching", startedAt: new Date().toISOString(), finishedAt: null,
+    entries: [...groups].map(([repository, members]) => ({ repository, name: members[0].name, ids: members.map((member) => member.id), state: "waiting", verified: false, changes: [], error: null, ms: null }))
+  };
+  const update = (entry?: FetchAllEntry, values?: Partial<FetchAllEntry>) => {
+    if (entry && values) Object.assign(entry, values);
+    options.onUpdate?.(snapshot);
+  };
+  update();
+  const known = options.lookup ? await options.lookup([...groups].map(([repository, members]) => ({ repository, project: members[0] }))).catch(() => new Map<string, RemoteRefs>()) : new Map<string, RemoteRefs>();
+  snapshot.phase = "fetching";
+  update();
+
+  const result: FetchAllResult = { fetched: 0, updated: 0, current: 0, skipped: 0, failed: [], snapshot };
+  await mapLimit(snapshot.entries, options.concurrency ?? 12, async (entry) => {
+    const members = groups.get(entry.repository)!;
+    const project = members[0];
+    const remote = project.git!.remoteName!;
+    if (!options.claim(entry.repository)) {
       result.skipped += 1;
+      update(entry, { state: "skipped" });
       return;
     }
+    const started = Date.now();
+    let changed = true;
     try {
-      await runGitAction(members[0], "fetch", {});
+      if (!/^[\w.-]+$/.test(remote)) throw new Error("Kein verwendbares Git-Remote erkannt.");
+      const before = await trackingRefs(entry.repository, remote);
+      const refs = known.get(entry.repository);
+      if (refs && refsMatchRemote(before, remote, refs)) {
+        await touchFetchHead(entry.repository);
+        changed = false;
+        result.current += 1;
+        update(entry, { state: "current", verified: true, ms: Date.now() - started });
+        return;
+      }
+      update(entry, { state: "fetching" });
+      const env = options.fetchEnv?.(project);
+      const args = ["fetch", "--progress", remote, "--prune"];
+      // Scheitert der Fetch mit dem Token (etwa ohne Zugriff auf eine Organisation), übernimmt der normale Anmeldeweg.
+      await (env ? gitTransfer(entry.repository, args, entry.repository, env).catch(() => gitTransfer(entry.repository, args)) : gitTransfer(entry.repository, args));
       result.fetched += 1;
+      const changes = await refChanges(entry.repository, remote, before, await trackingRefs(entry.repository, remote));
+      changed = changes.length > 0;
+      if (changed) result.updated += 1; else result.current += 1;
+      update(entry, { state: changed ? "updated" : "current", changes, ms: Date.now() - started });
     } catch (error) {
-      result.failed.push({ name: members[0].name, error: error instanceof Error ? error.message : String(error) });
+      const message = error instanceof Error ? error.message : String(error);
+      result.failed.push({ name: entry.name, error: message });
+      update(entry, { state: "failed", error: message, ms: Date.now() - started });
     } finally {
-      await options.settle(repository, members);
+      await options.settle(entry.repository, members, changed);
     }
   });
+  snapshot.phase = "done";
+  snapshot.finishedAt = new Date().toISOString();
+  update();
   return result;
 }
 

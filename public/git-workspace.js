@@ -24,6 +24,10 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
   let githubStatusLoading = false;
   // Laufende Übertragungen (Fetch, Pull, Push, Klonen) je Projekt-ID; ein Klon hat noch kein Projekt und läuft unter "clone".
   const transfers = new Map();
+  // Lauf von „Alle holen“ wie vom Server gemeldet: Phase und ein Eintrag je Repository.
+  let fetchRun = null;
+  let fetchError = null;
+  let fetchCurrentOpen = false;
   try { dismissedGuides = new Set(JSON.parse(localStorage.getItem("devhub_git_guides") || "[]")); } catch { /* ignore */ }
   const icon = name => `<i class="fa-solid fa-${name}" aria-hidden="true"></i>`;
   const selected = () => state.projects.find(p => p.id === state.activeGitProjectId);
@@ -478,7 +482,8 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
   }
 
   function loadGitHubStatus(force = false) {
-    if (githubStatusLoading || (!force && Date.now() - githubStatusAt < 120_000)) return;
+    // Im Hintergrund-Tab wird nicht nachgeladen; die nächste Darstellung im sichtbaren Tab holt es nach.
+    if (githubStatusLoading || (!force && (document.hidden || Date.now() - githubStatusAt < 120_000))) return;
     githubStatusLoading = true;
     api(`/api/git/github/status${force ? "?force=1" : ""}`)
       .then(result => { githubStatus = result; })
@@ -543,7 +548,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
     return `<header class="gw-board-head">
         <div class="gw-board-filters" role="group" aria-label="Repositories filtern">${filterChips.map(([value, label, count]) => button(`${label} <b>${count}</b>`, "ov-filter", `data-value="${value}" aria-pressed="${overviewFilter === value}"`, false, `gw-filter ${overviewFilter === value ? "active" : ""}`)).join("")}</div>
         <span class="gw-board-fetched">${latestFetch ? `Zuletzt geholt ${ago(latestFetch)}` : ""}</span>
-        ${button(icon(busy?.action === "fetch-all" ? "spinner fa-spin" : "arrows-rotate") + " Alle holen", "fetch-all", 'title="Fetch für jedes Repository mit Remote"', !repositories.some(p => p.git.remoteName))}${pushable.length ? button(icon("arrow-up") + ` ${plural(pushable.length, "Repo", "Repos")} pushen`, "push-all", 'title="Alle Repositories mit lokalen Commits pushen"', false, "gw-primary") : ""}</header>
+        ${fetchAllButton(repositories)}${pushable.length ? button(icon("arrow-up") + ` ${plural(pushable.length, "Repo", "Repos")} pushen`, "push-all", 'title="Alle Repositories mit lokalen Commits pushen"', false, "gw-primary") : ""}</header>
       ${notice ? `<div class="gw-notice ${notice.error ? "error" : "success"}" role="${notice.error ? "alert" : "status"}">${icon(notice.error ? "circle-exclamation" : "circle-check")}<span>${notice.id ? `<b>${esc(state.projects.find(x => x.id === notice.id)?.name || "")}</b> · ` : ""}${esc(notice.message)}</span>${button(icon("xmark"), "dismiss-notice", 'aria-label="Meldung schließen"', false, "gw-icon-button")}</div>` : ""}
       <div class="gw-view" data-gw-scroll="view"><section class="gw-overview">
         ${rows.length || withoutGit.length ? `<div class="gw-board">${rows.map(card).join("")}${withoutGit.length <= 3 ? withoutGit.map(noGitCard).join("") : ""}</div>` : `<p class="gw-list-empty">${q ? "Kein Repository passt zur Suche." : "Kein Repository passt zu diesem Filter."}</p>`}
@@ -583,6 +588,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
       if (focusKey) { const el = document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`); el?.focus({ preventScroll: true }); if (selection && el?.setSelectionRange) { try { el.setSelectionRange(...selection); } catch { /* search fields */ } } }
     }
     if (p && !data(p.id, "workspace") && !pendingReads.has(key(p.id, "workspace"))) queueMicrotask(() => ensure(p.id));
+    renderFetchDialog();
   }
 
   // Der Server meldet bis zu vier Stände pro Sekunde und Repository. Sichtbare Balken werden direkt aktualisiert,
@@ -593,8 +599,8 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
     let changed = false;
     for (const key of keys) {
       if (value) transfers.set(key, value); else transfers.delete(key);
-      const nodes = root.querySelectorAll(`[data-gw-progress="${CSS.escape(key)}"]`);
-      const shown = key === "clone" || view === "overview" || key === state.activeGitProjectId;
+      const nodes = [root, fetchDialog].flatMap(surface => [...surface.querySelectorAll(`[data-gw-progress="${CSS.escape(key)}"]`)]);
+      const shown = key === "clone" || view === "overview" || key === state.activeGitProjectId || fetchDialog.open;
       if (!value || !nodes.length) { changed ||= shown; continue; }
       for (const node of nodes) {
         node.classList.toggle("indeterminate", value.percent === null);
@@ -677,6 +683,113 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
     const id = selected()?.id;
     modal(title, description, extra, label, form => run(action, { ...payload, ...form }, id), danger);
   };
+  // „Alle holen“ hat einen eigenen Dialog: Er zeigt den Lauf live, lässt sich jederzeit schließen und wieder öffnen.
+  const fetchDialog = document.createElement("dialog");
+  fetchDialog.className = "gw-dialog gw-fetch-dialog";
+  fetchDialog.setAttribute("aria-labelledby", "gw-fetch-title");
+  document.body.append(fetchDialog);
+  const fetchRunning = () => busy?.action === "fetch-all" || Boolean(fetchRun && fetchRun.phase !== "done");
+  const fetchDone = run => run.entries.filter(e => !["waiting", "fetching"].includes(e.state)).length;
+  function fetchAllButton(repositories) {
+    const running = fetchRunning();
+    const label = running ? `${icon("spinner fa-spin")} ${fetchRun?.entries.length ? `Hole ${fetchDone(fetchRun)} / ${fetchRun.entries.length}` : "Alle holen"}` : `${icon("arrows-rotate")} Alle holen`;
+    // Während des Laufs bleibt der Knopf aktiv und öffnet den Fortschritt wieder.
+    return `<button type="button" class="gw-button" data-gw="fetch-all" title="${running ? "Fortschritt anzeigen" : "Fetch für jedes Repository mit Remote"}" ${!running && (busy || !repositories.some(p => p.git.remoteName)) ? "disabled" : ""}>${label}</button>`;
+  }
+  const refChange = c => {
+    if (c.kind === "tag") return c.change === "new" ? `${icon("tag")} Neues Tag <b>${esc(c.name)}</b>` : c.change === "deleted" ? `${icon("tag")} Tag <b>${esc(c.name)}</b> entfernt` : `${icon("tag")} Tag <b>${esc(c.name)}</b> verschoben`;
+    if (c.change === "new") return `${icon("code-branch")} Neuer Branch <b>${esc(c.name)}</b>`;
+    if (c.change === "deleted") return `${icon("code-branch")} Branch <b>${esc(c.name)}</b> gelöscht`;
+    if (c.change === "forced") return `${icon("triangle-exclamation")} <b>${esc(c.name)}</b> neu geschrieben (Force-Push)${c.commits ? `, ${plural(c.commits, "Commit", "Commits")}` : ""}`;
+    return `${icon("arrow-down")} <b>${esc(c.name)}</b> · ${c.commits === null ? "aktualisiert" : plural(c.commits, "neuer Commit", "neue Commits")}`;
+  };
+  const seconds = ms => (ms / 1000).toLocaleString("de-DE", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  function fetchDialogView() {
+    const run = fetchRun;
+    const entries = run?.entries || [];
+    const by = value => entries.filter(e => e.state === value);
+    const running = fetchRunning();
+    const total = entries.length;
+    const done = run ? fetchDone(run) : 0;
+    const [fetching, updated, failed, skipped, current, waiting] = ["fetching", "updated", "failed", "skipped", "current", "waiting"].map(by);
+    const verified = current.filter(e => e.verified).length;
+    const elapsed = run?.finishedAt ? new Date(run.finishedAt) - new Date(run.startedAt) : null;
+    const status = fetchError ? esc(fetchError)
+      : !run || (running && !total) ? "Wird gestartet …"
+      : run.phase === "checking" ? `Vergleiche ${plural(total, "Repository", "Repositories")} mit dem Stand auf GitHub …`
+      : running ? `${done} von ${total} erledigt${fetching.length ? ` · ${fetching.length} ${fetching.length === 1 ? "wird" : "werden"} geholt` : ""}`
+      : `Fertig in ${seconds(elapsed)} s · ${updated.length ? plural(updated.length, "Repository", "Repositories") + " mit Neuigkeiten" : "keine Neuigkeiten"}${failed.length ? ` · ${failed.length} fehlgeschlagen` : ""}`;
+    const percent = run?.phase === "checking" || !total ? null : Math.round(done / total * 100);
+    const project = e => state.projects.find(p => e.ids.includes(p.id));
+    const open = e => `<button type="button" class="gw-button gw-small gw-quiet" data-gw="repository" data-id="${esc(e.ids[0])}">Öffnen</button>`;
+    const pull = e => { const p = project(e); return p?.git?.behind && p.git.upstream && !p.git.ahead ? button(`${icon("arrow-down")} Pull`, "ov-action", `data-id="${p.id}" data-action="pull" title="${plural(p.git.behind, "Commit", "Commits")} übernehmen"`, false, "gw-small gw-primary") : ""; };
+    const row = (e, tone, glyph, detail, actions = "") => `<li class="gw-fetch-row tone-${tone}"><span class="gw-fetch-glyph">${icon(glyph)}</span><strong>${esc(e.name)}</strong><span class="gw-fetch-actions">${e.ms !== null && e.state !== "fetching" ? `<small>${seconds(e.ms)} s</small>` : ""}${actions}</span>${detail ? `<div class="gw-fetch-detail">${detail}</div>` : ""}</li>`;
+    const section = (title, rows) => rows ? `<section class="gw-fetch-section"><h3>${title}</h3><ul class="gw-fetch-list">${rows}</ul></section>` : "";
+    const body = [
+      section("Wird geholt", fetching.map(e => row(e, "info", "spinner fa-spin", transfers.has(e.ids[0]) ? transferView(e.ids[0]) : '<span class="gw-muted">Verbinde mit dem Remote …</span>')).join("")),
+      section("Neuigkeiten", updated.map(e => row(e, "ok", "cloud-arrow-down", `<ul class="gw-fetch-changes">${e.changes.map(c => `<li>${refChange(c)}</li>`).join("")}</ul>`, pull(e) + open(e))).join("")),
+      section("Fehlgeschlagen", failed.map(e => row(e, "danger", "circle-exclamation", esc(e.error || ""), open(e))).join("")),
+      section("Übersprungen", skipped.map(e => row(e, "warn", "hourglass-half", "Dort läuft gerade eine andere Git-Aktion.")).join("")),
+      current.length ? `<details class="gw-fetch-current" ${fetchCurrentOpen ? "open" : ""}><summary>${icon("circle-check")} ${plural(current.length, "Repository ist", "Repositories sind")} schon aktuell${verified ? `<small>${verified === current.length ? "alle" : verified} per GitHub-Abgleich, ohne Fetch</small>` : ""}</summary><ul class="gw-fetch-names">${current.map(e => `<li><button type="button" data-gw="repository" data-id="${esc(e.ids[0])}" title="${e.verified ? "Per GitHub-Abgleich bestätigt" : "Geholt, nichts Neues"}">${esc(e.name)}</button></li>`).join("")}</ul></details>` : "",
+      running && waiting.length && run?.phase !== "checking" ? `<p class="gw-fetch-waiting">${plural(waiting.length, "Repository wartet", "Repositories warten")} …</p>` : ""
+    ].join("");
+    return `<header><span class="gw-modal-glyph ${failed.length || fetchError ? "danger" : ""}">${icon(running ? "arrows-rotate fa-spin" : failed.length || fetchError ? "triangle-exclamation" : "circle-check")}</span><div><h2 id="gw-fetch-title">Alle Repositories holen</h2><p role="status">${status}</p></div><button type="button" class="gw-button gw-icon-button" data-fetch-close aria-label="Dialog schließen">${icon("xmark")}</button></header>
+      <div class="gw-fetch-overall"><span class="gw-progress ${percent === null && running ? "indeterminate" : ""}" role="progressbar" aria-label="Gesamtfortschritt" aria-valuemin="0" aria-valuemax="100" ${percent === null ? "" : `aria-valuenow="${percent}"`}><span class="gw-progress-track"><i data-width="${running ? percent ?? 100 : 100}"></i></span></span></div>
+      <div class="gw-fetch-body" data-fetch-scroll>${body || `<p class="gw-fetch-waiting">${fetchError ? "Es wurde nichts geholt." : "Repositories werden gesammelt …"}</p>`}</div>
+      <footer>${running ? '<button type="button" class="gw-button" data-fetch-close>Im Hintergrund weiterlaufen lassen</button>' : `<button type="button" class="gw-button" data-gw="fetch-all-again">${icon("arrows-rotate")} Nochmal holen</button><button type="button" class="gw-button gw-primary" data-fetch-close>Fertig</button>`}</footer>`;
+  }
+  function renderFetchDialog() {
+    if (!fetchDialog.open) return;
+    const html = fetchDialogView();
+    if (fetchDialog.__gwHtml === html) return;
+    const scroll = fetchDialog.querySelector("[data-fetch-scroll]")?.scrollTop || 0;
+    // Der Inhalt wird bei jedem Zwischenstand ersetzt; der Fokus bleibt im Dialog, zuletzt auf dem Schließen-Knopf der Fußzeile.
+    const hadFocus = fetchDialog.contains(document.activeElement);
+    fetchDialog.__gwHtml = html;
+    fetchDialog.innerHTML = html;
+    fetchDialog.querySelectorAll("[data-width]").forEach(el => { el.style.width = `${el.dataset.width}%`; });
+    const body = fetchDialog.querySelector("[data-fetch-scroll]"); if (body) body.scrollTop = scroll;
+    if (hadFocus) fetchDialog.querySelector("footer [data-fetch-close]")?.focus({ preventScroll: true });
+  }
+  function openFetchDialog() {
+    fetchDialog.__gwHtml = null;
+    if (!fetchDialog.open) fetchDialog.showModal();
+    renderFetchDialog();
+    fetchDialog.querySelector("footer [data-fetch-close]")?.focus();
+  }
+  async function fetchAll() {
+    const running = fetchRunning();
+    if (!running) { fetchRun = null; fetchError = null; fetchCurrentOpen = false; }
+    openFetchDialog();
+    if (running || busy) return;
+    busy = { id: null, action: "fetch-all" }; notice = null; render();
+    try {
+      const result = await api("/api/git/fetch-all", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      fetchRun = result.run;
+      if (result.projects) state.projects = result.projects;
+      activity.unshift({ id: null, message: result.message, error: Boolean(result.failed), time: new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) });
+      if (!fetchDialog.open && result.failed) notice = { id: null, message: result.message, error: true };
+      loadGitHubStatus(true);
+    } catch (error) {
+      fetchError = error.message;
+      if (!fetchDialog.open) notice = { id: null, message: error.message, error: true };
+    } finally {
+      if (activity.length > 100) activity.length = 100;
+      busy = null;
+      transfers.clear(); cache.clear(); pendingReads.clear();
+      renderApp();
+      ensure(state.activeGitProjectId);
+    }
+  }
+  fetchDialog.addEventListener("toggle", event => { if (event.target.matches(".gw-fetch-current")) fetchCurrentOpen = event.target.open; }, true);
+  fetchDialog.addEventListener("click", event => {
+    if (event.target === fetchDialog || event.target.closest("[data-fetch-close]")) { fetchDialog.close(); return; }
+    const target = event.target.closest("[data-gw]");
+    if (!target || target.disabled) return;
+    if (target.dataset.gw === "fetch-all-again") { fetchAll(); return; }
+    if (target.dataset.gw === "repository") fetchDialog.close();
+    interact(target).catch(error => toast(error.message, "error"));
+  });
   // The GitHub list comes from the locally signed-in GitHub CLI; cloning runs through gh so private repositories work without extra setup.
   const inWorkspace = repo => state.projects.find(p => p.git?.remoteUrl && p.git.remoteUrl.replace(/\.git$/, "").toLowerCase().endsWith(`github.com/${repo.nameWithOwner.toLowerCase()}`));
   function githubList() {
@@ -733,7 +846,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
     if (action === "overview") { view = "overview"; localStorage.setItem("devhub_git_view", view); render(); return; }
     if (action === "ov-filter") { overviewFilter = target.dataset.value; render(); return; }
     if (action === "ov-action") { await run(target.dataset.action, {}, target.dataset.id); return; }
-    if (action === "fetch-all") { if (await run("fetch-all")) loadGitHubStatus(true); return; }
+    if (action === "fetch-all") { await fetchAll(); return; }
     if (action === "push-all") {
       const targets = state.projects.filter(x => x.git?.remoteName && x.git.branch && x.git.lastCommit && (x.git.ahead || !x.git.upstream) && !x.git.behind);
       modal("Repositories pushen", `${plural(targets.length, "Repository wird", "Repositories werden")} nacheinander zum Remote übertragen.`, `<ul class="gw-dialog-list">${targets.map(x => `<li><strong>${esc(x.name)}</strong><small>${esc(x.git.branch)} · ${x.git.upstream ? plural(x.git.ahead, "Commit", "Commits") : "veröffentlichen"}</small></li>`).join("")}</ul>`, "Alle pushen", async () => { dialog.close(); await runEach("push", targets.map(x => x.id), "Push"); return true; }); return;
@@ -876,6 +989,7 @@ export function createGitWorkspace({ root, state, api, renderApp, renderPatch, e
   });
   return {
     render, load: ensure, progress,
+    fetchAllProgress: snapshot => { fetchRun = snapshot; render(); },
     openAddRepository: () => { if (!busy) addRepository(); },
     // Für die Befehlspalette und die Projektliste: GitHub-Repositories des angemeldeten Kontos und der Klon-Dialog.
     githubRepositories: async () => { await loadGithub(); return github; },

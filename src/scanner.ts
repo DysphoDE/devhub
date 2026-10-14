@@ -573,10 +573,26 @@ function gitRemoteWebUrl(remote: string): string | null {
   }
 }
 
+/**
+ * Ändert sich diese Datei (Pfad relativ zum Projektordner), können sich Name, Beschreibung, Technologien, Starter
+ * oder Vorschaubild des Projekts ändern; dann braucht es einen vollen Scan. Sonst genügt der Git-Status.
+ */
+export function affectsProjectMetadata(relativePath: string): boolean {
+  const segments = relativePath.split(/[\\/]+/).filter(Boolean);
+  const name = segments.at(-1)?.toLowerCase() ?? "";
+  const depth = segments.length - 1;
+  return projectManifestFiles.has(name) || starterFiles.has(name)
+    || /^(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|composer\.lock)$/.test(name)
+    || (thumbnailNames.has(name) && depth <= 1)
+    || ((/^readme(?:\.[a-z0-9_-]+)?$/.test(name) || name.endsWith(".html") || name.endsWith(".htm")) && depth <= 2);
+}
+
 export async function readGitInfo(repositoryPath: string | null, projectPath: string): Promise<GitInfo | null> {
   if (!repositoryPath) return null;
   try {
-    const options = { timeout: 5000, windowsHide: true, maxBuffer: 2_000_000 };
+    // GIT_OPTIONAL_LOCKS=0: git status frischt sonst den Index auf und schreibt ihn zurück. Das meldet der
+    // Workspace-Watcher als Änderung, und der nächste Scan schreibt wieder – eine Schleife, die nie zur Ruhe kommt.
+    const options = { timeout: 5000, windowsHide: true, maxBuffer: 2_000_000, env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" } };
     const [statusResult, logResult, activityResult, remoteResult, fetchHeadResult, staleBranches] = await Promise.all([
       execFileAsync("git", ["-C", repositoryPath, "status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"], options),
       execFileAsync("git", ["-C", repositoryPath, "log", "-1", "--format=%h%x1f%s%x1f%an%x1f%aI"], options).catch(() => ({ stdout: "", stderr: "" })),

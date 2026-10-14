@@ -5,12 +5,12 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, getAppDirectory, saveScanRoot } from "./config.js";
-import { advancedGitActions, fetchAllRepositories, onGitProgress, readGitWorkspace, readGitStash, readGitStats, readGitComparison, initializeGitRepository, cloneGitRepository, cloneGitHubRepository, listGitHubRepositories, readGitBranches, readGitCommit, readGitDiff, readGitHistory, runGitAction, suggestGitCommitMessage, type GitAction, type GitActionPayload } from "./git-actions.js";
+import { advancedGitActions, fetchAllRepositories, onGitProgress, readGitWorkspace, readGitStash, readGitStats, readGitComparison, initializeGitRepository, cloneGitRepository, cloneGitHubRepository, listGitHubRepositories, readGitBranches, readGitCommit, readGitDiff, readGitHistory, runGitAction, suggestGitCommitMessage, type FetchAllSnapshot, type GitAction, type GitActionPayload } from "./git-actions.js";
 import { markInstalled } from "./dependencies.js";
 import { ProcessManager } from "./process-manager.js";
 import { RunHistory, runFromSnapshot } from "./run-history.js";
-import { githubCliReady, githubRepository, readGitHubStatus } from "./github-status.js";
-import { mapLimit, readGitInfo, scanWorkspace } from "./scanner.js";
+import { githubCliReady, githubFetchEnv, githubRepository, githubToken, readGitHubRefs, readGitHubStatus } from "./github-status.js";
+import { affectsProjectMetadata, mapLimit, readGitInfo, scanWorkspace } from "./scanner.js";
 import { isStackAction } from "./stack.js";
 import { darkThemeStylesheet } from "./theme.js";
 import { resolveStack } from "./stack-registry.js";
@@ -27,8 +27,19 @@ await runHistory.load();
 const capabilities = await getSystemCapabilities(config);
 const publicUrl = config.publicUrl ?? `http://${config.publicHost}:${config.port}`;
 
-async function stackStatus() {
+// Jeder offene Tab fragt den Dienststatus alle acht Sekunden ab, und jede Abfrage startet tasklist.
+// Für drei Sekunden bedient ein Ergebnis alle Tabs; eine Stack-Aktion verwirft es sofort.
+let stackStatusCache: { at: number; value: ReturnType<typeof readStackStatus> } | null = null;
+async function readStackStatus() {
   return (await resolveStack(config)).getStatus(config);
+}
+function stackStatus() {
+  if (!stackStatusCache || Date.now() - stackStatusCache.at > 3000) {
+    const value = readStackStatus();
+    stackStatusCache = { at: Date.now(), value };
+    value.catch(() => { stackStatusCache = null; });
+  }
+  return stackStatusCache.value;
 }
 const csrfToken = randomBytes(24).toString("base64url");
 let projects: ProjectDefinition[] = [];
@@ -211,13 +222,60 @@ function scheduleWorkspaceRefresh(): void {
   watchDebounce.unref?.();
 }
 
+// Die meisten Änderungen betreffen ein einzelnes Projekt: eine bearbeitete Datei oder ein Commit im Terminal.
+// Dafür genügt dessen Git-Status. Den ganzen Workspace (alle Projekte, je sechs git-Aufrufe) liest DevHub nur neu,
+// wenn sich die Struktur ändert: neue oder entfernte Ordner außerhalb bekannter Projekte oder Manifest-Dateien.
+const gitRefreshQueue = new Set<string>();
+let gitRefreshTimer: NodeJS.Timeout | null = null;
+
+function repositoryOf(project: ProjectDefinition): string | null {
+  return project.git ? path.resolve(project.absolutePath, project.git.repositoryRoot) : null;
+}
+
+/** Wohin gehört eine Änderung? "scan" für einen vollen Scan, ein Repository-Pfad für dessen Git-Status, null für nichts. */
+function changeTarget(relativePath: string): string | "scan" | null {
+  const absolute = path.resolve(config.scanRoot, relativePath);
+  const owner = projects
+    .filter((project) => absolute === project.absolutePath || absolute.startsWith(project.absolutePath + path.sep))
+    .sort((a, b) => b.absolutePath.length - a.absolutePath.length)[0];
+  if (!owner) return "scan";
+  const inner = path.relative(owner.absolutePath, absolute);
+  const gitIndex = inner.split(path.sep).findIndex((segment) => segment.toLowerCase() === ".git");
+  if (gitIndex === -1 && inner && affectsProjectMetadata(inner)) return "scan";
+  // Ohne Git zeigt ein Projekt keinen Live-Zustand, den eine Dateiänderung verändern könnte.
+  return repositoryOf(owner) ?? (gitIndex !== -1 ? "scan" : null);
+}
+
+function queueGitRefresh(repository: string): void {
+  gitRefreshQueue.add(repository);
+  if (gitRefreshTimer) return;
+  gitRefreshTimer = setTimeout(async () => {
+    const repositories = [...gitRefreshQueue].filter((repository) => !busyRepositories.has(repository));
+    gitRefreshQueue.clear();
+    try {
+      const members = projects.filter((project) => repositories.includes(repositoryOf(project) ?? ""));
+      await mapLimit(members, 4, refreshProjectGit);
+      broadcastProjects();
+    } catch (error) {
+      console.warn(`Git-Status konnte nicht aktualisiert werden: ${error instanceof Error ? error.message : error}`);
+    } finally {
+      gitRefreshTimer = null;
+      if (gitRefreshQueue.size) queueGitRefresh([...gitRefreshQueue][0]);
+    }
+  }, 1000);
+  gitRefreshTimer.unref?.();
+}
+
 function startWorkspaceWatcher(): void {
   workspaceWatcher?.close();
   workspaceWatcher = null;
   try {
     workspaceWatcher = watch(config.scanRoot, { recursive: true, persistent: false }, (_eventType, filename) => {
       const relativePath = typeof filename === "string" ? filename : null;
-      if (isRelevantChange(relativePath) && !isOwnGitWrite(relativePath)) scheduleWorkspaceRefresh();
+      if (!isRelevantChange(relativePath) || isOwnGitWrite(relativePath)) return;
+      const target = relativePath ? changeTarget(relativePath) : "scan";
+      if (target === "scan") scheduleWorkspaceRefresh();
+      else if (target) queueGitRefresh(target);
     });
     workspaceWatcher.on("error", (error) => {
       console.warn(`Workspace-Überwachung unterbrochen: ${error instanceof Error ? error.message : error}`);
@@ -258,6 +316,43 @@ async function refreshProjectGit(project: ProjectDefinition): Promise<void> {
   project.git = await readGitInfo(repository, project.absolutePath);
 }
 
+// Holt alle Repositories mit Remote. Bei GitHub-Remotes wird vorher der Stand per API verglichen, sodass nur
+// Repositories mit Neuigkeiten wirklich gefetcht werden, und zwar mit dem Token der GitHub CLI.
+async function fetchAll() {
+  // Das Token wird erst im Abgleich geholt, damit der Dialog die Liste sofort zeigen kann.
+  let token: string | null = null;
+  const result = await fetchAllRepositories(projects, {
+    claim: (repository) => {
+      if (busyRepositories.has(repository)) return false;
+      busyRepositories.add(repository);
+      return true;
+    },
+    settle: async (repository, members, changed) => {
+      // Ohne bewegte Refs bleiben voraus/zurück gleich; dann reicht der neue Zeitpunkt statt eines vollen git status.
+      if (changed) await Promise.all(members.map(refreshProjectGit));
+      else for (const member of members) if (member.git) member.git = { ...member.git, lastFetchAt: new Date().toISOString() };
+      releaseRepository(repository);
+    },
+    lookup: async (repositories) => {
+      token = await githubToken();
+      if (!token) return new Map();
+      const linked = repositories.flatMap(({ repository, project }) => {
+        const repo = githubRepository(project.git?.remoteUrl ?? null);
+        return repo ? [{ repository, repo: repo.toLowerCase() }] : [];
+      });
+      const refs = await readGitHubRefs(linked.map((item) => item.repo), token!);
+      return new Map(linked.flatMap(({ repository, repo }) => refs.has(repo) ? [[repository, refs.get(repo)!] as const] : []));
+    },
+    fetchEnv: (project) => token && githubRepository(project.git?.remoteUrl ?? null) ? githubFetchEnv(token) : null,
+    onUpdate: (snapshot) => {
+      fetchAllRun = snapshot;
+      broadcast("git-fetch-all", snapshot);
+    }
+  });
+  broadcastProjects();
+  return result;
+}
+
 function serveStatic(requestPath: string, response: ServerResponse): void {
   const fontAwesomePrefix = "/vendor/fontawesome/";
   const isFontAwesomeAsset = requestPath.startsWith(fontAwesomePrefix);
@@ -293,6 +388,9 @@ function serveStatic(requestPath: string, response: ServerResponse): void {
 const busyRepositories = new Set<string>();
 const quietGitUntil = new Map<string, number>();
 let cloningRepository = false;
+// Letzter Lauf von „Alle holen“; die Oberfläche öffnet damit den Fortschrittsdialog auch nach einem Neuladen.
+let fetchAllRun: FetchAllSnapshot | null = null;
+let fetchingAll = false;
 
 function releaseRepository(repository: string): void {
   busyRepositories.delete(repository);
@@ -475,7 +573,7 @@ const server = createServer(async (request, response) => {
       if (!cli.ready) { sendJson(response, 200, { available: false, hint: cli.hint, repositories: {} }); return; }
       const force = url.searchParams.get("force") === "1";
       const linked = projects.filter((project) => githubRepository(project.git?.remoteUrl ?? null));
-      const entries = await mapLimit(linked, 4, async (project) => [project.id, await readGitHubStatus(githubRepository(project.git!.remoteUrl)!, project.git!.branch, force).catch(() => null)] as const);
+      const entries = await mapLimit(linked, 8, async (project) => [project.id, await readGitHubStatus(githubRepository(project.git!.remoteUrl)!, project.git!.branch, force).catch(() => null)] as const);
       sendJson(response, 200, { available: true, hint: null, repositories: Object.fromEntries(entries.filter(([, status]) => status)) });
       return;
     }
@@ -551,24 +649,22 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "GET" && pathname === "/api/git/fetch-all") {
+      sendJson(response, 200, { run: fetchAllRun });
+      return;
+    }
+
     if (request.method === "POST" && pathname === "/api/git/fetch-all") {
       if (!requireToken(request, response)) return;
-      const result = await fetchAllRepositories(projects, {
-        claim: (repository) => {
-          if (busyRepositories.has(repository)) return false;
-          busyRepositories.add(repository);
-          return true;
-        },
-        settle: async (repository, members) => {
-          await Promise.all(members.map(refreshProjectGit));
-          releaseRepository(repository);
-        }
-      });
-      broadcastProjects();
-      const parts = [`Fetch: ${result.fetched === 1 ? "1 Repository" : `${result.fetched} Repositories`} abgerufen`];
-      if (result.skipped) parts.push(`${result.skipped} übersprungen, weil dort bereits eine Git-Aktion läuft`);
-      if (result.failed.length) parts.push(`${result.failed.length} fehlgeschlagen (${result.failed.map(item => `${item.name}: ${item.error}`).join("; ")})`);
-      sendJson(response, 200, { message: `${parts.join(", ")}.`, failed: result.failed.length, projects: publicProjects() });
+      if (fetchingAll) throw new Error("Alle Repositories werden bereits geholt.");
+      fetchingAll = true;
+      try {
+        const result = await fetchAll();
+        const parts = [`${result.updated ? `${result.updated === 1 ? "1 Repository" : `${result.updated} Repositories`} mit Neuigkeiten` : "Keine Neuigkeiten"}, ${result.current} aktuell`];
+        if (result.skipped) parts.push(`${result.skipped} übersprungen, weil dort bereits eine Git-Aktion läuft`);
+        if (result.failed.length) parts.push(`${result.failed.length} fehlgeschlagen (${result.failed.map(item => `${item.name}: ${item.error}`).join("; ")})`);
+        sendJson(response, 200, { message: `${parts.join(", ")}.`, failed: result.failed.length, run: result.snapshot, projects: publicProjects() });
+      } finally { fetchingAll = false; }
       return;
     }
 
@@ -618,7 +714,8 @@ const server = createServer(async (request, response) => {
         return;
       }
       const message = await stack.runAction(config, stackActionMatch[1]);
-      sendJson(response, 200, { message, stack: await stack.getStatus(config) });
+      stackStatusCache = null;
+      sendJson(response, 200, { message, stack: await stackStatus() });
       return;
     }
 
