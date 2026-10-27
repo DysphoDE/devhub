@@ -163,6 +163,26 @@ test("behandelt Ordner mit eigenen Projektspuren trotz Unterordnern als Projekt"
   }
 });
 
+test("behandelt Ordner mit Python-Virtualenv als Projekt statt als Kategorie", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "devhub-venv-"));
+  try {
+    const archive = path.join(root, "archiv");
+    await mkdir(path.join(archive, ".venv", "bin"), { recursive: true });
+    await mkdir(path.join(archive, "downloader"), { recursive: true });
+    await mkdir(path.join(archive, "web"), { recursive: true });
+    await writeFile(path.join(archive, "README.md"), "# Archiv\n");
+    await writeFile(path.join(archive, "downloader", "archive.py"), "print('x')\n");
+    await writeFile(path.join(archive, "web", "app.py"), "print('x')\n");
+    await writeFile(path.join(archive, "web", "start.sh"), "#!/bin/sh\n");
+
+    const projects = await scanWorkspace(testConfig(root), path.join(root, "devhub"));
+    assert.deepEqual(projects.map((project) => project.relativePath), ["archiv"]);
+    if (!isWindows) assert.ok(projects[0].launchers.some((launcher) => launcher.relativeCwd === "web"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("liest mit categoryDepth 0 wieder flach ein", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "devhub-flat-"));
   try {

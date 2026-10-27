@@ -412,11 +412,13 @@ function isSourceFile(entry: Dirent): boolean {
     || /\.config\.(?:js|mjs|cjs|ts)$/.test(lowerName);
 }
 
-// Der Ordner selbst trägt die Spuren eines Projekts: ein Manifest, ein Repository, Quellcode oder
-// eine Startseite. Lose .html-Exporte oder ein Stylesheet reichen bewusst nicht.
+// Der Ordner selbst trägt die Spuren eines Projekts: ein Manifest, ein Repository, ein Python-Virtualenv,
+// Quellcode oder eine Startseite. Lose .html-Exporte oder ein Stylesheet reichen bewusst nicht.
+const projectRootFolderNames = new Set([".git", ".venv", "venv"]);
+
 function hasDirectProjectEvidence(entries: Dirent[]): boolean {
   return entries.some((entry) => {
-    if (entry.isDirectory()) return entry.name.toLowerCase() === ".git";
+    if (entry.isDirectory()) return projectRootFolderNames.has(entry.name.toLowerCase());
     return isSourceFile(entry) || /^index\.(?:html?|php)$/i.test(entry.name);
   });
 }
